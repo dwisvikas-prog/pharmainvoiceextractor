@@ -1,0 +1,78 @@
+// @ts-nocheck
+import { Trash2, Table as TableIcon } from 'lucide-react';
+import { ERP_COLUMNS } from '../utils/constants';
+import { ErpRow } from '../utils/ocr';
+
+interface StudioTableProps {
+  data: ErpRow[];
+  onDeleteRow: (index: number) => void;
+  onCellEdit: (rowIndex: number, colKey: string, value: string) => void;
+}
+
+export default function StudioTable({ data, onDeleteRow, onCellEdit }: StudioTableProps) {
+  return (
+    <div className="flex-1 overflow-auto">
+      <table className="w-full border-collapse text-left text-xs whitespace-nowrap">
+        <thead className="bg-slate-800 text-slate-300 sticky top-0 z-20 shadow">
+          <tr>
+            <th className="p-2 border-b border-r border-slate-700 w-10 text-center font-bold">#</th>
+            <th className="p-2 border-b border-r border-slate-700 w-12 text-center">Action</th>
+            {ERP_COLUMNS.map((col, i) => (
+              <th
+                key={i}
+                className={`p-2 border-b border-r border-slate-700 font-bold ${
+                  col === 'ITEM NAME' ? 'bg-indigo-950/80 text-indigo-300 min-w-[220px]' : ''
+                }`}
+              >
+                {col}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-800/60 text-slate-200">
+          {data.length > 0 ? (
+            data.map((row, rIdx) => (
+              <tr key={rIdx} className="hover:bg-slate-800/40 transition">
+                <td className="p-2 border-r border-slate-800 text-center text-slate-500 font-mono">
+                  {rIdx + 1}
+                </td>
+                <td className="p-2 border-r border-slate-800 text-center">
+                  <button
+                    onClick={() => onDeleteRow(rIdx)}
+                    className="p-1 text-slate-500 hover:text-rose-400 rounded transition"
+                    title="Delete Row"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </td>
+                {ERP_COLUMNS.map((col, cIdx) => (
+                  <td
+                    key={cIdx}
+                    className={`p-1 border-r border-slate-800/80 ${
+                      col === 'ITEM NAME' ? 'bg-indigo-950/20 font-semibold text-indigo-200' : ''
+                    }`}
+                  >
+                    <input
+                      type="text"
+                      value={row[col] || ''}
+                      onChange={(e) => onCellEdit(rIdx, col, e.target.value)}
+                      className="w-full bg-transparent px-1.5 py-1 text-xs text-slate-200 border border-transparent hover:border-slate-700 focus:border-indigo-500 rounded outline-none transition"
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td colSpan={ERP_COLUMNS.length + 2} className="p-12 text-center text-slate-500">
+                <TableIcon className="w-10 h-10 mx-auto mb-2 opacity-40 text-slate-400" />
+                <p className="text-sm font-semibold">No Table Data Loaded</p>
+                <p className="text-xs text-slate-600 mt-1">Upload an invoice PDF to automatically parse 34-column ERP data</p>
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
