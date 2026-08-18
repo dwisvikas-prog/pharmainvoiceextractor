@@ -2,6 +2,9 @@
 import { ERP_COLUMNS, HEADER_SYNONYMS, HEADER_KEYWORDS } from './constants';
 import Tesseract from 'tesseract.js';
 
+const GEMINI_OCR_MODEL = import.meta.env.VITE_GEMINI_MODEL || 'gemini-3.5-flash'; // Better extraction
+const GEMINI_OCR_MODEL_FALLBACK = 'gemini-3.5-flash-lite'; // Fallback if needed
+
 export interface ErpRow {
   [col: string]: string;
 }
@@ -155,6 +158,12 @@ export function groupTextIntoLines(
   const lineMap = new Map<number, any[]>();
 
   items.forEach((item: any) => {
+    // Skip invalid items
+    if (!item || !item.transform || !Array.isArray(item.transform) || item.transform.length < 6) {
+      console.warn("Skipping invalid text item:", item);
+      return;
+    }
+    
     const tx = item.transform;
     const x = tx[4];
     const y = pageHeight - tx[5];
@@ -526,18 +535,83 @@ export function parseTesseractTextToStructuredData(
 
 // ==================== OCR FUNCTIONS ====================
 
+function getGeminiApiKeys(): string[] {
+  const keys: string[] = [];
+  const primary = import.meta.env.VITE_GEMINI_API_KEY;
+  if (primary) keys.push(primary);
+  for (let i = 2; i <= 10; i++) {
+    const key = import.meta.env[`VITE_GEMINI_API_KEY_${i}`];
+    if (key) keys.push(key);
+  }
+  return keys;
+}
+
+async function callGeminiWithRotation(payload: any): Promise<string> {
+  const apiKeys = getGeminiApiKeys();
+  if (apiKeys.length === 0) throw new Error("No Gemini API keys found");
+  
+  const modelsToTry = [GEMINI_OCR_MODEL, GEMINI_OCR_MODEL_FALLBACK];
+  
+  for (const model of modelsToTry) {
+    console.log(`🚀 Trying: ${model}`);
+    const apiUrlBase = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+    for (let keyIndex = 0; keyIndex < apiKeys.length; keyIndex++) {
+      const apiKey = apiKeys[keyIndex];
+      const apiUrl = `${apiUrlBase}?key=${apiKey}`;
+      
+      try {
+        console.log(`📤 Uploading to API (Key ${keyIndex + 1})...`);
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        
+        if (!response.ok) {
+          const errText = await response.text();
+          console.error(`❌ ${response.status}: ${errText}`);
+          const error = new Error(`Gemini Vision API Error (${response.status}): ${errText}`) as Error & { status?: number };
+          error.status = response.status;
+          throw error;
+        }
+        
+        const result = await response.json();
+        const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) {
+          console.error("❌ No text in response:", JSON.stringify(result));
+          throw new Error("No text returned from Gemini");
+        }
+        
+        console.log(`✅ Success with ${model}, Response length: ${text.length}`);
+        console.log("Response preview:", text.substring(0, 200));
+        return text;
+      } catch (err: any) {
+        const status = err.status || 0;
+        console.error(`Key ${keyIndex + 1} (${model}) failed:`, err.message);
+        
+        // 429/503 = Rate limit, skip to next key immediately
+        if ((status === 503 || status === 429) && keyIndex < apiKeys.length - 1) {
+          console.log(`⏭️  Rotating to next API key...`);
+          continue;
+        }
+        
+        // 404 = Model not available, try next model
+        if (status === 404) {
+          console.log(`⏭️  Model ${model} not available, trying fallback...`);
+          break;
+        }
+      }
+    }
+  }
+  
+  throw new Error(`All AI models exhausted. Falling back to Local OCR (Tesseract).`);
+}
+
 export async function performGeminiOcrOnCanvas(canvas: HTMLCanvasElement): Promise<any> {
   if (!canvas) throw new Error("Canvas element unavailable for OCR");
 
-  const dataUrl = canvas.toDataURL('image/png');
-  const base64Data = dataUrl.split(',')[1];
-
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("VITE_GEMINI_API_KEY is not set in environment variables");
-  }
-
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const { base64Data, mimeType } = prepareCanvasForGemini(canvas);
 
   const userPrompt = `You are an expert pharmaceutical document parser and OCR AI. Extract structured header and line-item data from this pharmaceutical invoice image into strict JSON format.
 
@@ -578,67 +652,149 @@ export async function performGeminiOcrOnCanvas(canvas: HTMLCanvasElement): Promi
         { text: userPrompt },
         {
           inlineData: {
-            mimeType: "image/png",
+            mimeType,
             data: base64Data
           }
         }
       ]
     }],
     generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: "OBJECT",
-        properties: {
-          supplier: { type: "STRING" },
-          billNo: { type: "STRING" },
-          date: { type: "STRING" },
-          items: {
-            type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              properties: {
-                "ITEM NAME": { type: "STRING" },
-                "PACK": { type: "STRING" },
-                "BATCH": { type: "STRING" },
-                "EXPIRY": { type: "STRING" },
-                "QTY": { type: "STRING" },
-                "F.QTY": { type: "STRING" },
-                "SRATE": { type: "STRING" },
-                "MRP": { type: "STRING" },
-                "DIS": { type: "STRING" },
-                "AMOUNT": { type: "STRING" },
-                "HSNCODE": { type: "STRING" },
-                "CGST": { type: "STRING" },
-                "SGST": { type: "STRING" },
-                "IGST": { type: "STRING" },
-                "COMPANY": { type: "STRING" }
-              }
-            }
-          }
-        }
-      }
+      responseMimeType: "application/json"
     }
   };
 
-  const response = await fetch(apiUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+  const rawResponse = await callGeminiWithRotation(payload);
+  console.log("📝 Raw Gemini response:", rawResponse.substring(0, 300));
+  
+  try {
+    let parsed = JSON.parse(rawResponse);
+    
+    // Handle different response formats from Gemini
+    // Format 1: { header_metadata: {...}, line_items: [...] }
+    if (parsed.header_metadata) {
+      parsed = {
+        supplier: parsed.header_metadata.supplier_name || parsed.header_metadata.supplier || '',
+        billNo: parsed.header_metadata.invoice_number || parsed.header_metadata.billNo || '',
+        date: parsed.header_metadata.invoice_date || parsed.header_metadata.date || '',
+        items: parsed.line_items || parsed.items || []
+      };
+    }
+    // Format 2: { header: {...}, line_items: [...] }
+    else if (parsed.header && !parsed.supplier) {
+      parsed = {
+        supplier: parsed.header.supplier_name || parsed.header.supplier || '',
+        billNo: parsed.header.invoice_number || parsed.header.billNo || '',
+        date: parsed.header.invoice_date || parsed.header.date || '',
+        items: parsed.line_items || parsed.items || []
+      };
+    } 
+    // Format 3: Ensure items field exists
+    else if (!parsed.items && parsed.line_items) {
+      parsed.items = parsed.line_items;
+    }
+    
+    // Normalize field names in items
+    if (parsed.items && Array.isArray(parsed.items)) {
+      parsed.items = parsed.items.map((item: any) => {
+        const normalized: any = {};
+        for (const [key, value] of Object.entries(item)) {
+          const lowerKey = key.toLowerCase();
+          // Map common variations
+          if (lowerKey.includes('item_name') || lowerKey.includes('product_name') || lowerKey === 'name') normalized['ITEM NAME'] = value;
+          else if (lowerKey.includes('hsncode') || lowerKey.includes('hsn_code') || lowerKey === 'hsn') normalized['HSNCODE'] = value;
+          else if (lowerKey === 'pack' || lowerKey.includes('packing')) normalized['PACK'] = value;
+          else if (lowerKey === 'batch' || lowerKey.includes('batch')) normalized['BATCH'] = value;
+          else if (lowerKey === 'company' || lowerKey.includes('manufacturer')) normalized['COMPANY'] = value;
+          else if (lowerKey === 'expiry' || lowerKey.includes('exp')) normalized['EXPIRY'] = value;
+          else if (lowerKey === 'qty' || lowerKey.includes('quantity')) normalized['QTY'] = value;
+          else if (lowerKey.includes('free') || lowerKey === 'f_qty') normalized['F.QTY'] = value;
+          else if (lowerKey === 'srate' || lowerKey === 'rate' || lowerKey === 'ptr') normalized['SRATE'] = value;
+          else if (lowerKey === 'mrp' || lowerKey === 'mfp') normalized['MRP'] = value;
+          else if (lowerKey === 'discount' || lowerKey === 'dis') normalized['DIS'] = value;
+          else if (lowerKey === 'amount' || lowerKey === 'total') normalized['AMOUNT'] = value;
+          else if (lowerKey === 'cgst' || lowerKey.includes('cgst')) normalized['CGST'] = value;
+          else if (lowerKey === 'sgst' || lowerKey.includes('sgst')) normalized['SGST'] = value;
+          else if (lowerKey === 'igst' || lowerKey.includes('igst')) normalized['IGST'] = value;
+          else normalized[key.toUpperCase()] = value;
+        }
+        return normalized;
+      });
+    }
+    
+    console.log("✅ Normalized response:", JSON.stringify(parsed).substring(0, 200));
+    return parsed;
+  } catch (parseErr) {
+    console.error("❌ JSON Parse Error:", parseErr, "\nRaw:", rawResponse);
+    // Try to extract JSON if wrapped in text
+    const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        let extracted = JSON.parse(jsonMatch[0]);
+        console.log("✅ Extracted JSON from wrapped response");
+        // Re-run normalization on extracted JSON
+        if (extracted.header_metadata) {
+          extracted = {
+            supplier: extracted.header_metadata.supplier_name || '',
+            billNo: extracted.header_metadata.invoice_number || '',
+            date: extracted.header_metadata.invoice_date || '',
+            items: extracted.line_items || []
+          };
+        }
+        return extracted;
+      } catch (_) {
+        console.error("❌ Could not extract JSON from response");
+      }
+    }
+    throw new Error(`Invalid JSON response from Gemini: ${rawResponse.substring(0, 200)}`);
+  }
+}
+
+function prepareCanvasForGemini(canvas: HTMLCanvasElement): { base64Data: string; mimeType: string } {
+  const maxDimension = 1400; // Good balance: accuracy + speed
+  const largestDimension = Math.max(canvas.width, canvas.height);
+  const scale = largestDimension > maxDimension ? maxDimension / largestDimension : 1;
+  const output = document.createElement('canvas');
+  output.width = Math.max(1, Math.round(canvas.width * scale));
+  output.height = Math.max(1, Math.round(canvas.height * scale));
+
+  const context = output.getContext('2d')!;
+  context.fillStyle = '#FFFFFF';
+  context.fillRect(0, 0, output.width, output.height);
+  context.drawImage(canvas, 0, 0, output.width, output.height);
+
+  const dataUrl = output.toDataURL('image/jpeg', 0.75); // Better quality for text extraction
+  return { base64Data: dataUrl.split(',')[1], mimeType: 'image/jpeg' };
+}
+
+export async function performGeminiVerbatimOcrOnCanvas(
+  canvas: HTMLCanvasElement,
+  onProgress?: (message: string) => void
+): Promise<string> {
+  if (!canvas) throw new Error("Canvas element unavailable for OCR");
+
+  onProgress?.("Preparing image...");
+  const { base64Data, mimeType } = prepareCanvasForGemini(canvas);
+
+  onProgress?.("Extracting text...");
+  const text = await callGeminiWithRotation({
+    contents: [{
+      role: 'user',
+      parts: [
+        {
+          text: 'Transcribe all visible text from this invoice image exactly as it appears. Preserve line breaks and table rows where possible. Return only the extracted text, without commentary or Markdown.'
+        },
+        { inlineData: { mimeType, data: base64Data } }
+      ]
+    }],
+    generationConfig: {
+      thinkingConfig: {
+        thinkingBudget: 0
+      }
+    }
   });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Gemini Vision API Error (${response.status}): ${errText}`);
-  }
-
-  const result = await response.json();
-  const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-
-  if (!jsonText) {
-    throw new Error("No data returned from Gemini AI Vision OCR");
-  }
-
-  return JSON.parse(jsonText);
+  onProgress?.("Text extracted.");
+  return text;
 }
 
 export function preprocessCanvasForOcr(sourceCanvas: HTMLCanvasElement): HTMLCanvasElement {

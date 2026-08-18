@@ -1,0 +1,32 @@
+[33mcommit 5cc71a8caf4fce039eebd06c358d0fc89aa6ec75[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Author: dwisvikas-prog <dwisvikas@gmail.com>
+Date:   Mon Aug 17 11:10:36 2026 +0530
+
+    Initial React project
+
+ .env.example                     |    1 [32m+[m
+ .gitignore                       |    4 [32m+[m
+ check-build.cjs                  |   15 [32m+[m
+ check-build.js                   |   15 [32m+[m
+ check-build.mjs                  |   15 [32m+[m
+ index.html                       |   12 [32m+[m
+ package-lock.json                | 3613 [32m++++++++++++++++++++++++++++++++++++++[m
+ package.json                     |   29 [32m+[m
+ path/to/your/edited/file.py      |   33 [32m+[m
+ pdf_to_excel_extractor.tsx       | 1258 [32m+++++++++++++[m
+ postcss.config.js                |    6 [32m+[m
+ src/App.tsx                      |  898 [32m++++++++++[m
+ src/components/MetadataPanel.tsx |   67 [32m+[m
+ src/components/StudioTable.tsx   |   78 [32m+[m
+ src/components/UploadMenu.tsx    |   53 [32m+[m
+ src/index.css                    |   14 [32m+[m
+ src/main.tsx                     |   10 [32m+[m
+ src/utils/constants.ts           |   37 [32m+[m
+ src/utils/ocr.ts                 |  714 [32m++++++++[m
+ src/utils/pdfExtraction.ts       |  165 [32m++[m
+ src/vite-env.d.ts                |    1 [32m+[m
+ tailwind.config.js               |   11 [32m+[m
+ tsconfig.json                    |   21 [32m+[m
+ tsconfig.node.json               |   10 [32m+[m
+ vite.config.ts                   |    6 [32m+[m
+ 25 files changed, 7086 insertions(+)

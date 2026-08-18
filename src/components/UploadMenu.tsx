@@ -7,6 +7,7 @@ interface UploadMenuProps {
   onSelectPdf: () => void;
   onSelectExcel: () => void;
   onSelectText: () => void;
+  onSelectPdfToCsv?: () => void;
 }
 
 export default function UploadMenu({
@@ -14,7 +15,9 @@ export default function UploadMenu({
   selectedType,
   onSelectPdf,
   onSelectExcel,
-  onSelectText
+  onSelectText,
+  onSelectPdfToCsv
+
 }: UploadMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -48,6 +51,14 @@ export default function UploadMenu({
       >
         <span>Upload Text File</span>
       </button>
+          {onSelectPdfToCsv && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onSelectPdfToCsv(); }}
+          className="w-full text-left px-4 py-2 text-sm text-slate-200 hover:bg-slate-700 flex items-center space-x-2"
+        >
+          <span>PDF to CSV Converter</span>
+        </button>
+      )}
     </div>
   );
 }

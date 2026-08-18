@@ -20,9 +20,11 @@ export async function extractDataFromPage(doc: any, pageNum: number, headerInfo:
   }
 
   const items = textContent.items.map((item: any) => {
+    if (!Array.isArray(item?.transform) || item.transform.length < 6) return null;
     const tx = item.transform;
     const x = tx[4];
     const y = pageHeight - tx[5];
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
     return {
       text: item.str,
       x: Math.round(x),
@@ -30,17 +32,23 @@ export async function extractDataFromPage(doc: any, pageNum: number, headerInfo:
       width: item.width || (item.str.length * 6),
       height: item.height || 10
     };
-  }).filter((item: any) => item.text.trim().length > 0);
+  }).filter((item: any) => item !== null && item.text.trim().length > 0);
 
   if (items.length === 0) return null;
 
   const sortedLines = groupTextIntoLines(items, pageHeight);
+  const rawTextLines: RawTextLine[] = [];
+  
+  // Convert sorted lines back to RawTextLine format for detectInvoiceMetadata
+  sortedLines.forEach(line => {
+    rawTextLines.push({ y: line.y, text: line.text });
+  });
 
   let detectedSupplier = headerInfo.supplier;
   let detectedBillNo = headerInfo.billNo;
   let detectedDate = headerInfo.date;
 
-  const metadata = detectInvoiceMetadata(sortedLines);
+  const metadata = detectInvoiceMetadata(rawTextLines);
   if (metadata.supplier && !detectedSupplier) detectedSupplier = metadata.supplier;
   if (metadata.billNo && !detectedBillNo) detectedBillNo = metadata.billNo;
   if (metadata.date && !detectedDate) detectedDate = metadata.date;
@@ -88,6 +96,7 @@ export async function extractAllPagesData(doc: any, headerInfo: InvoiceHeader): 
   billNo: string;
   date: string;
   isScanned: boolean;
+  needsAiVerification: boolean;
 }> {
   let combinedRows: ErpRow[] = [];
   let finalSupplier = headerInfo.supplier;
@@ -108,12 +117,26 @@ export async function extractAllPagesData(doc: any, headerInfo: InvoiceHeader): 
     r["PSRLNO"] = String(idx + 1);
   });
 
+  const validRows = combinedRows.filter(row => {
+    const hasItemName = Boolean(row['ITEM NAME']?.trim());
+    const hasInvoiceDetail = ['QTY', 'BATCH', 'EXPIRY', 'SRATE', 'MRP', 'AMOUNT']
+      .some(column => Boolean(row[column]?.trim()));
+    return hasItemName && hasInvoiceDetail;
+  });
+  const detailedRows = validRows.filter(row =>
+    ['QTY', 'BATCH', 'EXPIRY', 'AMOUNT'].filter(column => Boolean(row[column]?.trim())).length >= 2
+  );
+  const needsAiVerification = combinedRows.length === 0 ||
+    validRows.length !== combinedRows.length ||
+    detailedRows.length < Math.ceil(combinedRows.length * 0.7);
+
   return {
     rows: combinedRows,
     supplier: finalSupplier,
     billNo: finalBillNo,
     date: finalDate,
-    isScanned: combinedRows.length === 0
+    isScanned: combinedRows.length === 0,
+    needsAiVerification
   };
 }
 
