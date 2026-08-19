@@ -127,7 +127,10 @@ export function normalizeToErpRows(
 
       Object.keys(item).forEach(key => {
         const upperKey = key.toUpperCase();
-        if (ERP_COLUMNS.includes(upperKey)) {
+        const normalizedKey = key.toLowerCase().replace(/[._-]/g, '').replace(/\s+/g, '');
+        if (['ftrate', 'frate', 'rate', 'prate', 'price'].includes(normalizedKey)) {
+          fullRow["FTRATE"] = String(item[key] || "");
+        } else if (ERP_COLUMNS.includes(upperKey)) {
           fullRow[upperKey] = String(item[key] || "");
         }
       });
@@ -238,10 +241,26 @@ export function mapColumns(
     const textUpper = hItem.text.trim().toUpperCase();
     let matchedErpCol = "ITEM NAME";
 
-    for (const [erpCol, synonyms] of Object.entries(HEADER_SYNONYMS)) {
-      if (synonyms.some(s => textUpper === s || textUpper.includes(s))) {
-        matchedErpCol = erpCol;
-        break;
+    const ftrateAliases = ["FTRATE", "F RATE", "F.RATE", "F-RATE", "F_RATE", "RATE", "PRATE", "P RATE", "P.RATE", "PRICE"];
+    if (ftrateAliases.includes(textUpper)) {
+      matchedErpCol = "FTRATE";
+    }
+
+    if (matchedErpCol === "ITEM NAME") {
+      for (const [erpCol, synonyms] of Object.entries(HEADER_SYNONYMS)) {
+        if (synonyms.some(s => textUpper === s)) {
+          matchedErpCol = erpCol;
+          break;
+        }
+      }
+    }
+
+    if (matchedErpCol === "ITEM NAME") {
+      for (const [erpCol, synonyms] of Object.entries(HEADER_SYNONYMS)) {
+        if (synonyms.some(s => textUpper.includes(s))) {
+          matchedErpCol = erpCol;
+          break;
+        }
       }
     }
 
@@ -303,9 +322,18 @@ export function parseWithHeadersFormat(jsonData: any[]): ErpRow[] {
   const colMapping: { [key: number]: string } = {};
   headers.forEach((header, idx) => {
     for (const [erpCol, synonyms] of Object.entries(HEADER_SYNONYMS)) {
-      if (synonyms.some(s => header.includes(s) || s.includes(header))) {
+      if (synonyms.some(s => header === s)) {
         colMapping[idx] = erpCol;
         break;
+      }
+    }
+
+    if (!colMapping[idx]) {
+      for (const [erpCol, synonyms] of Object.entries(HEADER_SYNONYMS)) {
+        if (synonyms.some(s => header.includes(s) || s.includes(header))) {
+          colMapping[idx] = erpCol;
+          break;
+        }
       }
     }
   });
@@ -503,7 +531,7 @@ export function parseTesseractTextToStructuredData(
         if (numbers.length >= 2) {
           const secondLast = numbers[numbers.length - 2];
           if (secondLast.includes('.')) {
-            row["SRATE"] = secondLast;
+            row["FTRATE"] = secondLast;
           }
         }
 
@@ -632,7 +660,8 @@ export async function performGeminiOcrOnCanvas(canvas: HTMLCanvasElement): Promi
    - "EXPIRY": Expiry date in MM/YY or MM/YYYY format (e.g., "10/26", "11/27").
    - "QTY": Billed Quantity (numeric or string count).
    - "F.QTY": Free/Scheme/Bonus Quantity (default to "0" if missing).
-   - "SRATE": Unit Purchase/Sale Rate (PTR/Rate before tax).
+  - "FTRATE": Any field/header named FTRATE, F RATE, F.RATE, RATE, PRATE, P.RATE, or PRICE.
+  - "SRATE": Sale rate only when the source explicitly says SRATE, S.RATE, or S RATE. Never put a generic RATE/PRICE/PRATE value here.
    - "MRP": Maximum Retail Price.
    - "DIS": Discount percentage or discount amount.
    - "AMOUNT": Total taxable/net amount for the line item.
@@ -708,7 +737,8 @@ export async function performGeminiOcrOnCanvas(canvas: HTMLCanvasElement): Promi
           else if (lowerKey === 'expiry' || lowerKey.includes('exp')) normalized['EXPIRY'] = value;
           else if (lowerKey === 'qty' || lowerKey.includes('quantity')) normalized['QTY'] = value;
           else if (lowerKey.includes('free') || lowerKey === 'f_qty') normalized['F.QTY'] = value;
-          else if (lowerKey === 'srate' || lowerKey === 'rate' || lowerKey === 'ptr') normalized['SRATE'] = value;
+          else if (lowerKey === 'srate' || lowerKey === 's.rate' || lowerKey === 's rate') normalized['SRATE'] = value;
+          else if (['ftrate', 'f rate', 'f.rate', 'f-rate', 'f_rate', 'frate', 'rate', 'prate', 'p rate', 'p.rate', 'price'].includes(lowerKey)) normalized['FTRATE'] = value;
           else if (lowerKey === 'mrp' || lowerKey === 'mfp') normalized['MRP'] = value;
           else if (lowerKey === 'discount' || lowerKey === 'dis') normalized['DIS'] = value;
           else if (lowerKey === 'amount' || lowerKey === 'total') normalized['AMOUNT'] = value;

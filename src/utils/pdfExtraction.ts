@@ -59,7 +59,7 @@ export async function extractDataFromPage(doc: any, pageNum: number, headerInfo:
   if (headerIndex !== -1) {
     detectedColumns = mapColumns(sortedLines[headerIndex], pageWidth);
   } else {
-    const defaultCols = ["ITEM NAME", "PACK", "BATCH", "EXPIRY", "QTY", "SRATE", "MRP", "AMOUNT"];
+    const defaultCols = ["ITEM NAME", "PACK", "BATCH", "EXPIRY", "QTY", "FTRATE", "MRP", "AMOUNT"];
     const colWidth = pageWidth / defaultCols.length;
     detectedColumns = defaultCols.map((col, i) => ({
       xStart: i * colWidth,
@@ -119,7 +119,7 @@ export async function extractAllPagesData(doc: any, headerInfo: InvoiceHeader): 
 
   const validRows = combinedRows.filter(row => {
     const hasItemName = Boolean(row['ITEM NAME']?.trim());
-    const hasInvoiceDetail = ['QTY', 'BATCH', 'EXPIRY', 'SRATE', 'MRP', 'AMOUNT']
+    const hasInvoiceDetail = ['QTY', 'BATCH', 'EXPIRY', 'FTRATE', 'SRATE', 'MRP', 'AMOUNT']
       .some(column => Boolean(row[column]?.trim()));
     return hasItemName && hasInvoiceDetail;
   });

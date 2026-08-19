@@ -178,9 +178,10 @@ export default function App() {
     setIsProcessing(true);
     setStatusMsg(`Loading "${file.name}"...`);
     setTableData([]);
-    setDocHeaderInfo({ supplier: '', billNo: '', date: '' });
+    const freshHeader = { supplier: '', billNo: '', date: '' };
+    setDocHeaderInfo(freshHeader);
     setIsScannedPdf(false);
-    ocrCacheKeyRef.current = `invoice_ocr_cache:${file.name}:${file.size}:${file.lastModified}`;
+    ocrCacheKeyRef.current = `invoice_ocr_cache_v2:${file.name}:${file.size}:${file.lastModified}`;
 
     if (file.type.startsWith('image/')) {
       setIsScannedPdf(true);
@@ -231,7 +232,7 @@ export default function App() {
 
       let result;
       try {
-        result = await extractAllPagesData(loadedPdf, docHeaderInfo);
+        result = await extractAllPagesData(loadedPdf, freshHeader);
       } catch (extractionError) {
         console.warn('[PDF] Fast extraction failed:', extractionError);
         setIsScannedPdf(true);
@@ -308,7 +309,8 @@ export default function App() {
               else if (header === "EXPIRY") rowObj["EXPIRY"] = String(row[idx] || "");
               else if (header === "PACK") rowObj["PACK"] = String(row[idx] || "");
               else if (header === "MRP") rowObj["MRP"] = String(row[idx] || "");
-              else if (header === "RATE" || header === "SRATE") rowObj["SRATE"] = String(row[idx] || "");
+              else if (["FTRATE", "F RATE", "F.RATE", "F-RATE", "F_RATE", "RATE", "PRATE", "P RATE", "P.RATE", "PRICE"].includes(header)) rowObj["FTRATE"] = String(row[idx] || "");
+              else if (header === "SRATE") rowObj["SRATE"] = String(row[idx] || "");
               else if (header === "AMOUNT") rowObj["AMOUNT"] = String(row[idx] || "");
               else if (header === "HSN" || header === "HSNCODE") rowObj["HSNCODE"] = String(row[idx] || "");
               else if (header === "CGST") rowObj["CGST"] = String(row[idx] || "");
@@ -403,7 +405,8 @@ export default function App() {
                 else if (header === "EXPIRY") rowObj["EXPIRY"] = String(row[idx] || "");
                 else if (header === "PACK") rowObj["PACK"] = String(row[idx] || "");
                 else if (header === "MRP") rowObj["MRP"] = String(row[idx] || "");
-                else if (header === "RATE" || header === "SRATE") rowObj["SRATE"] = String(row[idx] || "");
+                else if (["FTRATE", "F RATE", "F.RATE", "F-RATE", "F_RATE", "RATE", "PRATE", "P RATE", "P.RATE", "PRICE"].includes(header)) rowObj["FTRATE"] = String(row[idx] || "");
+                else if (header === "SRATE") rowObj["SRATE"] = String(row[idx] || "");
                 else if (header === "AMOUNT") rowObj["AMOUNT"] = String(row[idx] || "");
               });
               rowObj["_RAW_TEXT"] = row.map((cell: any) => cell !== undefined ? String(cell) : "").join(" | ");

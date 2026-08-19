@@ -10,7 +10,7 @@ export const ERP_COLUMNS = [
 export const HEADER_KEYWORDS = [
   "ITEM NAME", "ITEM", "PRODUCT", "DESCRIPTION", "PARTICULARS", "DRUG NAME", 
   "MEDICINE", "NAME OF ITEM", "BRAND", "QTY", "QUANTITY", "BATCH", "EXPIRY", 
-  "PACK", "PACKING", "MRP", "RATE", "PTR", "AMOUNT", "HSN", "CGST", "SGST", "IGST"
+  "PACK", "PACKING", "MRP", "FTRATE", "F RATE", "RATE", "PRATE", "PRICE", "PTR", "AMOUNT", "HSN", "CGST", "SGST", "IGST"
 ];
 
 export const HEADER_SYNONYMS: Record<string, string[]> = {
@@ -25,7 +25,8 @@ export const HEADER_SYNONYMS: Record<string, string[]> = {
   "EXPIRY": ["EXPIRY", "EXP", "EXP.", "EXP DATE", "EXP.DATE", "MFG/EXP", "E.DATE", "EXP DATE/MFG", "EXP DT", "EXP-DATE", "EXPDATE"],
   "QTY": ["QTY", "QUANTITY", "QTY.", "NOS", "QNTY", "BILLED QTY", "BILL QTY", "P.QTY"],
   "F.QTY": ["F.QTY", "FREE QTY", "FREE", "FREE NOS", "BONUS", "SCHEME QTY", "F QTY", "FREE QTY."],
-  "SRATE": ["SRATE", "S.RATE", "RATE", "PTR", "P.RATE", "PUR RATE", "PURCHASE RATE", "UNIT PRICE", "RATE (RS)", "PRICE", "NET RATE", "S RATE"],
+  "FTRATE": ["FTRATE", "F RATE", "F.RATE", "F-RATE", "F_RATE", "RATE", "PRATE", "P RATE", "P.RATE", "PRICE"],
+  "SRATE": ["SRATE", "S.RATE", "S RATE"],
   "MRP": ["MRP", "M.R.P.", "M.R.P", "MRP (RS)", "MAX RETAIL PRICE", "R.P.", "M.R.P (RS)"],
   "DIS": ["DIS", "DISC", "DISC%", "DIS %", "DISCOUNT", "LESS", "DISC AMT", "DISC.", "DIS%"],
   "AMOUNT": ["AMOUNT", "NET AMOUNT", "TOTAL", "TOTAL AMOUNT", "VALUE", "AMT", "NET AMT", "TAXABLE VALUE", "TOTAL AMT"],
