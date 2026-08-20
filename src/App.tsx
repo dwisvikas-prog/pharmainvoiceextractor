@@ -266,6 +266,37 @@ export default function App() {
     };
   }, []);
 
+  const ocrPdfPagesToRows = async (
+    pdf: any,
+    pageNums: number[],
+    header: InvoiceHeader,
+    startIndex: number
+  ): Promise<ErpRow[]> => {
+    let combinedItems: any[] = [];
+    let finalHeader = { ...header };
+    for (const pageNum of pageNums) {
+      setStatusMsg(`OCR page ${pageNum} of ${pdf.numPages}...`);
+      const tempCanvas = document.createElement('canvas');
+      const ctx = tempCanvas.getContext('2d')!;
+      const page = await pdf.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 1.5, rotation: previewRotation });
+      tempCanvas.width = viewport.width;
+      tempCanvas.height = viewport.height;
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const rawText = await performTesseractOcrOnCanvas(tempCanvas, setTesseractProgress);
+      if (!rawText) continue;
+      const parsed = parseTesseractTextToStructuredData(rawText, finalHeader, autoFillHeaderInfo);
+      if (parsed.header.supplier && !finalHeader.supplier) finalHeader.supplier = parsed.header.supplier;
+      if (parsed.header.billNo && !finalHeader.billNo) finalHeader.billNo = parsed.header.billNo;
+      if (parsed.header.date && !finalHeader.date) finalHeader.date = parsed.header.date;
+      if (Array.isArray(parsed.items)) combinedItems = [...combinedItems, ...parsed.items];
+    }
+    if (finalHeader.supplier || finalHeader.billNo || finalHeader.date) {
+      setDocHeaderInfo(finalHeader);
+    }
+    return normalizeToErpRows(combinedItems, finalHeader, autoFillHeaderInfo, startIndex);
+  };
+
   const processFile = async (file: File) => {
     if (!file) return;
 
@@ -334,7 +365,23 @@ export default function App() {
       setTableData(assignUniqueRandomCodes(result.rows));
       setDocHeaderInfo({ supplier: result.supplier, billNo: result.billNo, date: result.date });
 
-      if (result.needsAiVerification) {
+      if (result.pagesNeedingOcr?.length > 0) {
+        setIsScannedPdf(true);
+        setStatusMsg(`Checking page ${result.pagesNeedingOcr.join(', ')} for more items (OCR)...`);
+        const extraRows = await ocrPdfPagesToRows(
+          loadedPdf,
+          result.pagesNeedingOcr,
+          { supplier: result.supplier, billNo: result.billNo, date: result.date },
+          result.rows.length
+        );
+        const merged = assignUniqueRandomCodes([...result.rows, ...extraRows]);
+        setTableData(merged);
+        setStatusMsg(
+          extraRows.length
+            ? `Extracted ${merged.length} rows from ${loadedPdf.numPages} pages.`
+            : `Page ${result.pagesNeedingOcr.join(', ')} had no extra table. Use Local OCR / Verify OCR if items are missing.`
+        );
+      } else if (result.needsAiVerification) {
         setIsScannedPdf(true);
         setStatusMsg('Fast extraction needs verification. Try Local OCR first; use Verify OCR only for unclear pages.');
       } else {
@@ -1199,10 +1246,12 @@ const handleConvertPdfToCsv = async () => {
                 onExport={handleExportExcel}
                 canExport={tableData.length > 0}
               />
-              {isScannedPdf && (
+              {(isScannedPdf || totalPages > 1) && (
                 <div className="ocr-banner border rounded-xl px-3 py-2 flex flex-wrap items-center gap-2 text-xs">
                   <Scan className="w-4 h-4 text-cyan-800 flex-shrink-0" />
-                  <span className="font-semibold">Scanned invoice — choose OCR:</span>
+                  <span className="font-semibold">
+                    {totalPages > 1 ? `PDF has ${totalPages} pages — OCR any missing page:` : 'Scanned invoice — choose OCR:'}
+                  </span>
                   <button
                     onClick={() => handleRunTesseractOcr('current')}
                     disabled={isProcessing}
@@ -1211,6 +1260,16 @@ const handleConvertPdfToCsv = async () => {
                     <Scan className="w-3.5 h-3.5" />
                     <span>Local OCR (Current Page)</span>
                   </button>
+                  {totalPages > 1 && (
+                    <button
+                      onClick={() => handleRunTesseractOcr('all')}
+                      disabled={isProcessing}
+                      className="ocr-btn ocr-btn-local py-1 px-2.5 rounded text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
+                    >
+                      <Scan className="w-3.5 h-3.5" />
+                      <span>Local OCR (All Pages)</span>
+                    </button>
+                  )}
                   <button
                     onClick={() => handleRunAiOcr('current')}
                     disabled={isProcessing || aiRateLimited}

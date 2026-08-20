@@ -2,18 +2,21 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import { ErpRow, RawTextLine, InvoiceHeader, groupTextIntoLines, detectTableBounds, mapColumns, buildTableRows, detectInvoiceMetadata } from './ocr';
 
-export async function extractDataFromPage(doc: any, pageNum: number, headerInfo: InvoiceHeader, topCutoff = 12, bottomCutoff = 88): Promise<{
+export async function extractDataFromPage(doc: any, pageNum: number, headerInfo: InvoiceHeader, topCutoff = 12, bottomCutoff = 88, reuseColumns = null): Promise<{
   rows: ErpRow[];
   supplier: string;
   billNo: string;
   date: string;
   lines: RawTextLine[];
+  columns: any[] | null;
+  hasHeader: boolean;
 } | null> {
   const page = await doc.getPage(pageNum);
   const textContent = await page.getTextContent();
   const viewport = page.getViewport({ scale: 1.0 });
   const pageHeight = viewport.height;
   const pageWidth = viewport.width;
+  const isContinuation = pageNum > 1;
 
   if (!textContent.items || textContent.items.length === 0) {
     return null;
@@ -38,8 +41,6 @@ export async function extractDataFromPage(doc: any, pageNum: number, headerInfo:
 
   const sortedLines = groupTextIntoLines(items, pageHeight);
   const rawTextLines: RawTextLine[] = [];
-  
-  // Convert sorted lines back to RawTextLine format for detectInvoiceMetadata
   sortedLines.forEach(line => {
     rawTextLines.push({ y: line.y, text: line.text });
   });
@@ -60,10 +61,13 @@ export async function extractDataFromPage(doc: any, pageNum: number, headerInfo:
   if (metadata.date && !detectedDate) detectedDate = metadata.date;
 
   const { headerIndex } = detectTableBounds(sortedLines, pageHeight);
+  const hasHeader = headerIndex !== -1;
 
-  let detectedColumns;
-  if (headerIndex !== -1) {
+  let detectedColumns = null;
+  if (hasHeader) {
     detectedColumns = mapColumns(sortedLines[headerIndex], pageWidth);
+  } else if (reuseColumns?.length) {
+    detectedColumns = reuseColumns;
   } else {
     const defaultCols = ["ITEM NAME", "PACK", "BATCH", "EXPIRY", "QTY", "FTRATE", "MRP", "AMOUNT"];
     const colWidth = pageWidth / defaultCols.length;
@@ -76,28 +80,33 @@ export async function extractDataFromPage(doc: any, pageNum: number, headerInfo:
     }));
   }
 
-  const topPixelLimit = topCutoff / 100 * pageHeight;
-  const bottomPixelLimit = bottomCutoff / 100 * pageHeight;
+  const effectiveTop = isContinuation && !hasHeader ? Math.min(topCutoff, 5) : topCutoff;
+  const effectiveBottom = isContinuation && !hasHeader ? Math.max(bottomCutoff, 96) : bottomCutoff;
+  const topPixelLimit = effectiveTop / 100 * pageHeight;
+  const bottomPixelLimit = effectiveBottom / 100 * pageHeight;
 
   const tableDataLines = sortedLines.filter((line, idx) => {
-    if (idx === headerIndex) return false;
+    if (hasHeader && idx === headerIndex) return false;
     if (line.y < topPixelLimit || line.y > bottomPixelLimit) return false;
     return true;
   });
 
   const extractedRows = buildTableRows(tableDataLines, detectedColumns);
-  extractedRows.forEach(row => {
+  const itemRows = extractedRows.filter(row => Boolean(String(row['ITEM NAME'] || '').trim()));
+  itemRows.forEach(row => {
     if (!row["SUPPLIER"]) row["SUPPLIER"] = detectedSupplier || "";
     if (!row["BILL NO."]) row["BILL NO."] = detectedBillNo || "";
     if (!row["DATE"]) row["DATE"] = detectedDate || "";
   });
 
   return {
-    rows: extractedRows,
+    rows: itemRows,
     supplier: detectedSupplier,
     billNo: detectedBillNo,
     date: detectedDate,
-    lines: sortedLines
+    lines: sortedLines,
+    columns: hasHeader ? detectedColumns : reuseColumns,
+    hasHeader
   };
 }
 
@@ -108,19 +117,27 @@ export async function extractAllPagesData(doc: any, headerInfo: InvoiceHeader, t
   date: string;
   isScanned: boolean;
   needsAiVerification: boolean;
+  pagesNeedingOcr: number[];
 }> {
   let combinedRows: ErpRow[] = [];
   let finalSupplier = headerInfo.supplier;
   let finalBillNo = headerInfo.billNo;
   let finalDate = headerInfo.date;
 
+  let sharedColumns = null;
+  const pagesNeedingOcr: number[] = [];
+
   for (let p = 1; p <= doc.numPages; p++) {
-    const pageResult = await extractDataFromPage(doc, p, headerInfo, topCutoff, bottomCutoff);
+    const pageResult = await extractDataFromPage(doc, p, headerInfo, topCutoff, bottomCutoff, sharedColumns);
     if (pageResult) {
+      if (pageResult.hasHeader && pageResult.columns) sharedColumns = pageResult.columns;
       combinedRows = [...combinedRows, ...pageResult.rows];
       if (pageResult.supplier && !finalSupplier) finalSupplier = pageResult.supplier;
       if (pageResult.billNo && !finalBillNo) finalBillNo = pageResult.billNo;
       if (pageResult.date && !finalDate) finalDate = pageResult.date;
+      if (pageResult.rows.length === 0) pagesNeedingOcr.push(p);
+    } else {
+      pagesNeedingOcr.push(p);
     }
   }
 
@@ -149,8 +166,9 @@ export async function extractAllPagesData(doc: any, headerInfo: InvoiceHeader, t
     supplier: finalSupplier,
     billNo: finalBillNo,
     date: finalDate,
-    isScanned: combinedRows.length === 0,
-    needsAiVerification
+    isScanned: combinedRows.length === 0 || pagesNeedingOcr.length > 0,
+    needsAiVerification,
+    pagesNeedingOcr
   };
 }
 
