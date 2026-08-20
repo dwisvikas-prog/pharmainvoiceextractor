@@ -9,6 +9,270 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+body.bg-theme-paper {
+  background-color: #f8fafc;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.75)),
+    url('./assets/bg-paper.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+body.bg-theme-yellow,
+body.bg-theme-mint,
+body.bg-theme-sky,
+body.bg-theme-peach,
+body.bg-theme-ocean,
+body.bg-theme-coral,
+body.bg-theme-slate {
+  background-image: linear-gradient(rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.75));
+}
+
+body.bg-theme-yellow {
+  background-color: #f4c400;
+  --shape-a: rgba(232, 130, 12, 0.55);
+  --shape-b: rgba(236, 148, 20, 0.45);
+  --shape-c: rgba(220, 110, 8, 0.4);
+}
+body.bg-theme-mint {
+  background-color: #7dcea0;
+  --shape-a: rgba(30, 132, 73, 0.5);
+  --shape-b: rgba(39, 174, 96, 0.4);
+  --shape-c: rgba(20, 90, 50, 0.38);
+}
+body.bg-theme-sky {
+  background-color: #5dade2;
+  --shape-a: rgba(41, 128, 185, 0.5);
+  --shape-b: rgba(52, 152, 219, 0.4);
+  --shape-c: rgba(21, 67, 96, 0.35);
+}
+body.bg-theme-peach {
+  background-color: #f5b48a;
+  --shape-a: rgba(211, 84, 0, 0.45);
+  --shape-b: rgba(230, 126, 34, 0.4);
+  --shape-c: rgba(175, 96, 26, 0.35);
+}
+body.bg-theme-ocean {
+  background-color: #1abc9c;
+  --shape-a: rgba(22, 160, 133, 0.5);
+  --shape-b: rgba(17, 122, 101, 0.42);
+  --shape-c: rgba(14, 98, 81, 0.38);
+}
+body.bg-theme-coral {
+  background-color: #f1948a;
+  --shape-a: rgba(192, 57, 43, 0.45);
+  --shape-b: rgba(231, 76, 60, 0.4);
+  --shape-c: rgba(146, 43, 33, 0.35);
+}
+body.bg-theme-slate {
+  background-color: #94a3b8;
+  --shape-a: rgba(51, 65, 85, 0.45);
+  --shape-b: rgba(71, 85, 105, 0.4);
+  --shape-c: rgba(30, 41, 59, 0.35);
+}
+
+.bg-shapes-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  opacity: 0.4;
+}
+.bg-shapes-layer span {
+  position: absolute;
+  border-radius: 2.75rem;
+  background: var(--shape-a);
+}
+.bg-shapes-layer span:nth-child(1) {
+  width: 38vw;
+  height: 42vh;
+  min-width: 280px;
+  right: -6%;
+  top: 8%;
+  transform: rotate(18deg);
+}
+.bg-shapes-layer span:nth-child(2) {
+  width: 32vw;
+  height: 36vh;
+  right: 4%;
+  top: 28%;
+  transform: rotate(-8deg);
+  background: var(--shape-b);
+}
+.bg-shapes-layer span:nth-child(3) {
+  width: 22vw;
+  height: 28vh;
+  right: 18%;
+  bottom: 6%;
+  transform: rotate(12deg);
+  background: var(--shape-c);
+}
+.bg-shapes-layer span:nth-child(4) {
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  right: 22%;
+  top: 38%;
+  background: rgba(255, 255, 255, 0.75);
+}
+
 #root {
   min-height: 100vh;
+  background: transparent;
+  position: relative;
+  z-index: 1;
 }
+
+/* Light workspace theme: preserve saturated action buttons, make all content surfaces readable on white. */
+.app-shell {
+  background: transparent !important;
+}
+.app-shell [class*="bg-slate-950"],
+.app-shell [class*="bg-slate-900"],
+.app-shell [class*="bg-slate-800"] {
+  background-color: rgba(255, 255, 255, 0.55) !important;
+}
+.app-shell [class*="bg-slate-700"] { background-color: #e2e8f0 !important; }
+.app-shell [class*="border-slate-"] { border-color: #cbd5e1 !important; }
+.app-shell [class*="text-slate-100"],
+.app-shell [class*="text-slate-200"],
+.app-shell [class*="text-slate-300"] { color: #0f172a !important; }
+.app-shell [class*="text-slate-400"] { color: #475569 !important; }
+.app-shell [class*="text-slate-500"],
+.app-shell [class*="text-slate-600"] { color: #64748b !important; }
+.app-shell [class*="bg-indigo-950"],
+.app-shell [class*="bg-purple-950"] { background-color: rgba(255, 255, 255, 0.55) !important; }
+.app-shell [class*="hover:bg-slate-"]:hover { background-color: #e2e8f0 !important; }
+
+.app-shell .header-btn-refresh,
+.app-shell .header-btn-upload,
+.app-shell .ocr-btn,
+.app-shell .ocr-btn-local,
+.app-shell .ocr-btn-verify,
+.app-shell .ocr-btn-all {
+  background-color: #0e7490 !important;
+  color: #ffffff !important;
+}
+.app-shell .header-btn-refresh:hover,
+.app-shell .header-btn-upload:hover,
+.app-shell .ocr-btn:hover,
+.app-shell .ocr-btn-local:hover,
+.app-shell .ocr-btn-verify:hover,
+.app-shell .ocr-btn-all:hover {
+  background-color: #155e75 !important;
+}
+.app-shell .header-btn-refresh svg,
+.app-shell .header-btn-upload svg,
+.app-shell .ocr-btn svg {
+  color: #ffffff !important;
+}
+
+.app-shell .preview-toggle,
+.app-shell .preview-toggle:hover,
+.app-shell .preview-toggle:focus,
+.app-shell .preview-toggle svg {
+  color: #0f172a !important;
+}
+
+.app-shell .bg-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid #94a3b8;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.app-shell .ocr-banner {
+  background-color: rgba(255, 255, 255, 0.55) !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+.app-shell .preview-panel,
+.app-shell .preview-panel-card,
+.app-shell .preview-stage,
+.app-shell .preview-dropzone {
+  background-color: rgba(255, 255, 255, 0.55) !important;
+}
+
+@media (min-width: 768px) {
+  .app-shell .preview-panel.has-split {
+    width: var(--preview-w, 380px);
+    max-width: 560px;
+  }
+}
+
+.app-shell .preview-splitter {
+  width: 6px;
+  flex-shrink: 0;
+  align-self: stretch;
+  cursor: col-resize;
+  background-color: #e2e8f0;
+}
+.app-shell .preview-splitter:hover,
+.app-shell .preview-splitter:active {
+  background-color: #0e7490;
+}
+
+.app-shell .preview-canvas {
+  height: auto;
+  display: block;
+  background-color: #ffffff;
+}
+
+.app-shell .cutoff-line .cutoff-label {
+  position: absolute;
+  left: 8px;
+  top: -14px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  color: inherit;
+  background: #ffffff;
+  padding: 0 4px;
+}
+.app-shell .cutoff-line-bottom .cutoff-label {
+  top: 10px;
+}
+
+.app-shell .preview-canvas-idle {
+  position: absolute !important;
+  width: 0 !important;
+  height: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+}
+
+.app-shell .cutoff-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 10px;
+  margin-top: -5px;
+  border: 0;
+  padding: 0;
+  cursor: ns-resize;
+  z-index: 5;
+  background: transparent;
+}
+
+.app-shell .cutoff-line::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 2px;
+  border-top: 2px dashed currentColor;
+}
+
+.app-shell .cutoff-line-top { color: #16a34a; }
+.app-shell .cutoff-line-bottom { color: #dc2626; }

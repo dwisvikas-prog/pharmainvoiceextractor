@@ -21,49 +21,24 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
 import { useState, useEffect, useRef } from 'react';
 import {
   FileText, Upload, Download, Sparkles, RefreshCw,
-  Eye, Table as TableIcon,
-  ChevronRight, ChevronLeft, Search, Plus, Scan,
-  Pill, Zap, Filter
+  Eye, Table as TableIcon, ZoomIn, ZoomOut,
+  ChevronRight, ChevronLeft, ChevronDown, Search, Plus, Scan, Trash2,
+  Pill, Zap, RotateCcw, RotateCw
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import * as XLSX from 'xlsx';
-import { ERP_COLUMNS } from './utils/constants';
+import { ERP_COLUMNS, SHOW_RAW_PDF_TEXT_TAB, THEME_OPTIONS, ZERO_FILL_COLUMNS, type AppThemeId } from './utils/constants';
 import { ErpRow, InvoiceHeader, RawTextLine, normalizeToErpRows, performGeminiOcrOnCanvas, performTesseractOcrOnCanvas, parseTesseractTextToStructuredData, performGeminiVerbatimOcrOnCanvas } from './utils/ocr';
 import { extractAllPagesData, loadPdfDocument, renderPdfPageToCanvas } from './utils/pdfExtraction';
 import UploadMenu from './components/UploadMenu';
+import ThemeMenu from './components/ThemeMenu';
 import MetadataPanel from './components/MetadataPanel';
 import StudioTable from './components/StudioTable';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
-const INITIAL_SAMPLE_DATA: ErpRow[] = [
-  {
-    "SUPPLIER": "HEALING PHARMACY CHD", "BILL NO.": "MK010343", "DATE": "29-07-2026", "COMPANY": "LARENO", "CODE": "", "BARCODE": "",
-    "ITEM NAME": "DAPAHENZ M 10/500", "PACK": "10'S", "BATCH": "EMV242373C", "EXPIRY": "10/26", "QTY": "10", "F.QTY": "0", "HALFP": "", "FTRATE": "",
-    "SRATE": "120.71", "MRP": "158.44", "DIS": "0", "EXCISE": "", "VAT": "", "ADNLVAT": "", "AMOUNT": "120.71", "LOCALCENT": "", "SCM1": "", "SCM2": "",
-    "SCMPER": "", "HSNCODE": "30049099", "CGST": "6.00", "SGST": "6.00", "IGST": "0", "PSRLNO": "1", "TCSPER": "", "TCSAMT": "", "ALTERCODE": "", "PONUMBER": ""
-  },
-  {
-    "SUPPLIER": "HEALING PHARMACY CHD", "BILL NO.": "MK010343", "DATE": "29-07-2026", "COMPANY": "LARENO", "CODE": "", "BARCODE": "",
-    "ITEM NAME": "DAPAHENZ M 10/500", "PACK": "10'S", "BATCH": "EMV253045A", "EXPIRY": "11/27", "QTY": "15", "F.QTY": "0", "HALFP": "", "FTRATE": "",
-    "SRATE": "132.14", "MRP": "173.43", "DIS": "0", "EXCISE": "", "VAT": "", "ADNLVAT": "", "AMOUNT": "264.28", "LOCALCENT": "", "SCM1": "", "SCM2": "",
-    "SCMPER": "", "HSNCODE": "30049099", "CGST": "6.00", "SGST": "6.00", "IGST": "0", "PSRLNO": "2", "TCSPER": "", "TCSAMT": "", "ALTERCODE": "", "PONUMBER": ""
-  },
-  {
-    "SUPPLIER": "HEALING PHARMACY CHD", "BILL NO.": "MK010343", "DATE": "29-07-2026", "COMPANY": "DR RED", "CODE": "", "BARCODE": "",
-    "ITEM NAME": "GLIMY M1 FORTE", "PACK": "1*10", "BATCH": "E2600061", "EXPIRY": "10/27", "QTY": "3", "F.QTY": "0", "HALFP": "", "FTRATE": "",
-    "SRATE": "91.96", "MRP": "120.70", "DIS": "0", "EXCISE": "", "VAT": "", "ADNLVAT": "", "AMOUNT": "275.88", "LOCALCENT": "", "SCM1": "", "SCM2": "",
-    "SCMPER": "", "HSNCODE": "30049062", "CGST": "6.00", "SGST": "6.00", "IGST": "0", "PSRLNO": "3", "TCSPER": "", "TCSAMT": "", "ALTERCODE": "", "PONUMBER": ""
-  },
-  {
-    "SUPPLIER": "HEALING PHARMACY CHD", "BILL NO.": "MK010343", "DATE": "29-07-2026", "COMPANY": "DR RED", "CODE": "", "BARCODE": "",
-    "ITEM NAME": "XYZAL5 TAB", "PACK": "1*10", "BATCH": "TE2501289", "EXPIRY": "4/27", "QTY": "2", "F.QTY": "0", "HALFP": "", "FTRATE": "", "SRATE": "155.90", "MRP": "204.60", "DIS": "0", "EXCISE": "", "VAT": "", "ADNLVAT": "", "AMOUNT": "311.80", "LOCALCENT": "", "SCM1": "", "SCM2": "",
-    "SCMPER": "", "HSNCODE": "30049099", "CGST": "6.00", "SGST": "6.00", "IGST": "0", "PSRLNO": "4", "TCSPER": "", "TCSAMT": "", "ALTERCODE": "", "PONUMBER": ""
-  }
-];
-
-const AI_OCR_CONCURRENCY = 6; // Back to original for speed
+const AI_OCR_CONCURRENCY = 6;
 
 async function mapWithConcurrency<T, R>(
   values: T[],
@@ -89,12 +64,34 @@ function getRetryDelayMilliseconds(message: string): number {
   return match ? Math.ceil(Number(match[1]) * 1000) : 60_000;
 }
 
+function assignUniqueRandomCodes(rows: ErpRow[]): ErpRow[] {
+  const used = new Set<string>();
+  for (const row of rows) {
+    const existing = String(row?.CODE ?? '').trim();
+    if (/^\d{3}$/.test(existing) && existing !== '000') used.add(existing);
+  }
+  return rows.map((row) => {
+    let code = String(row?.CODE ?? '').trim();
+    if (!/^\d{3}$/.test(code) || code === '000') {
+      do {
+        code = String(100 + Math.floor(Math.random() * 900));
+      } while (used.has(code));
+    }
+    used.add(code);
+    const next: ErpRow = { ...row, CODE: code };
+    ZERO_FILL_COLUMNS.forEach((col) => {
+      if (!String(next[col] ?? '').trim()) next[col] = '0';
+    });
+    return next;
+  });
+}
+
 export default function App() {
-  const [tableData, setTableData] = useState<ErpRow[]>(INITIAL_SAMPLE_DATA);
+  const [tableData, setTableData] = useState<ErpRow[]>([]);
   const [docHeaderInfo, setDocHeaderInfo] = useState<InvoiceHeader>({
-    supplier: 'HEALING PHARMACY CHD',
-    billNo: 'MK010343',
-    date: '29-07-2026'
+    supplier: '',
+    billNo: '',
+    date: ''
   });
   const [activeTab, setActiveTab] = useState<'studio' | 'raw'>('studio');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -111,14 +108,36 @@ export default function App() {
   const [ocrUsageCount, setOcrUsageCount] = useState(0);
   const [selectedUploadType, setSelectedUploadType] = useState<'excel' | 'text' | null>(null);
   const [showMasterMenu, setShowMasterMenu] = useState(false);
+  const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [activeView, setActiveView] = useState<'extractor' | 'csv'>('extractor');
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvContent, setCsvContent] = useState<string>('');
   const [isCsvProcessing, setIsCsvProcessing] = useState(false);
   const [csvStatus, setCsvStatus] = useState('');
   const [aiRetryUntil, setAiRetryUntil] = useState(0);
+  const [previewRotation, setPreviewRotation] = useState(0);
+  const [isPreviewExpanded, setIsPreviewExpanded] = useState(true);
+  const [tableTopCutoff, setTableTopCutoff] = useState(12);
+  const [tableBottomCutoff, setTableBottomCutoff] = useState(88);
+  const [previewWidth, setPreviewWidth] = useState(380);
+  const [previewZoom, setPreviewZoom] = useState(1);
+  const [bgOption, setBgOption] = useState<AppThemeId>(() => {
+    try {
+      const saved = localStorage.getItem('app_bg_option');
+      if (saved === '2') return 'yellow';
+      if (saved === '1' || !saved) return 'paper';
+      if (THEME_OPTIONS.some((t) => t.id === saved)) return saved as AppThemeId;
+    } catch (_) {}
+    return 'paper';
+  });
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const previewWrapRef = useRef<HTMLDivElement>(null);
+  const cutoffDragRef = useRef<null | 'top' | 'bottom'>(null);
+  const splitDragRef = useRef(false);
+  const splitStartRef = useRef({ x: 0, w: 380 });
+  const cutoffsRef = useRef({ top: 12, bottom: 88 });
+  const imageSourceRef = useRef<HTMLImageElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
@@ -164,6 +183,13 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => {
+    const classes = ['bg-theme-1', 'bg-theme-2', ...THEME_OPTIONS.map((t) => `bg-theme-${t.id}`)];
+    document.body.classList.remove(...classes);
+    document.body.classList.add(`bg-theme-${bgOption}`);
+    try { localStorage.setItem('app_bg_option', bgOption); } catch (_) {}
+  }, [bgOption]);
+
   const incrementOcrUsage = (count = 1) => {
     setOcrUsageCount(prev => {
       const newCount = prev + count;
@@ -172,16 +198,87 @@ export default function App() {
     });
   };
 
+  const drawImagePreview = (image: HTMLImageElement, rotation: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const isSideways = rotation % 180 !== 0;
+    canvas.width = isSideways ? image.height : image.width;
+    canvas.height = isSideways ? image.width : image.height;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.fillStyle = '#FFFFFF';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.save();
+    context.translate(canvas.width / 2, canvas.height / 2);
+    context.rotate((rotation * Math.PI) / 180);
+    context.drawImage(image, -image.width / 2, -image.height / 2);
+    context.restore();
+  };
+
+  const rotatePreview = (direction: -90 | 90) => {
+    setPreviewRotation(current => {
+      const next = (current + direction + 360) % 360;
+      setStatusMsg(`Preview rotated ${next}°. OCR will use this orientation.`);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    cutoffsRef.current = { top: tableTopCutoff, bottom: tableBottomCutoff };
+  }, [tableTopCutoff, tableBottomCutoff]);
+
+  const applyCutoffFromPointer = (clientY: number) => {
+    const wrap = previewWrapRef.current;
+    const which = cutoffDragRef.current;
+    if (!wrap || !which) return;
+    const rect = wrap.getBoundingClientRect();
+    if (rect.height <= 0) return;
+    const pct = Math.max(2, Math.min(98, ((clientY - rect.top) / rect.height) * 100));
+    const { top, bottom } = cutoffsRef.current;
+    if (which === 'top') {
+      const next = Math.min(pct, bottom - 8);
+      setTableTopCutoff(next);
+      cutoffsRef.current.top = next;
+    } else {
+      const next = Math.max(pct, top + 8);
+      setTableBottomCutoff(next);
+      cutoffsRef.current.bottom = next;
+    }
+  };
+
+  useEffect(() => {
+    const onMove = (event: PointerEvent) => {
+      applyCutoffFromPointer(event.clientY);
+      if (splitDragRef.current) {
+        const next = Math.max(240, Math.min(560, splitStartRef.current.w + (event.clientX - splitStartRef.current.x)));
+        setPreviewWidth(next);
+      }
+    };
+    const onUp = () => {
+      cutoffDragRef.current = null;
+      splitDragRef.current = false;
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, []);
+
   const processFile = async (file: File) => {
     if (!file) return;
 
     setIsProcessing(true);
+    setPreviewZoom(1);
     setStatusMsg(`Loading "${file.name}"...`);
     setTableData([]);
     const freshHeader = { supplier: '', billNo: '', date: '' };
     setDocHeaderInfo(freshHeader);
     setIsScannedPdf(false);
-    ocrCacheKeyRef.current = `invoice_ocr_cache_v2:${file.name}:${file.size}:${file.lastModified}`;
+    setPreviewRotation(0);
+    imageSourceRef.current = null;
+    ocrCacheKeyRef.current = `invoice_ocr_cache_v3:${file.name}:${file.size}:${file.lastModified}`;
 
     if (file.type.startsWith('image/')) {
       setIsScannedPdf(true);
@@ -193,14 +290,9 @@ export default function App() {
       reader.onload = (e) => {
         const img = new Image();
         img.onload = () => {
-          if (canvasRef.current) {
-            const canvas = canvasRef.current;
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const ctx = canvas.getContext('2d');
-            ctx!.drawImage(img, 0, 0);
-          }
-          setStatusMsg("Image loaded. Use Tesseract OCR (free) or AI Vision OCR to extract data.");
+          imageSourceRef.current = img;
+          drawImagePreview(img, 0);
+          setStatusMsg("Image loaded. Use Local OCR or Verify OCR to extract data.");
           setIsProcessing(false);
         };
         img.src = e.target?.result as string;
@@ -220,7 +312,7 @@ export default function App() {
         if (cached) {
           const { rows, header } = JSON.parse(cached);
           if (Array.isArray(rows) && header) {
-            setTableData(rows);
+            setTableData(assignUniqueRandomCodes(rows));
             setDocHeaderInfo(header);
             setStatusMsg(`Loaded ${rows.length} cached OCR rows instantly.`);
             return;
@@ -232,19 +324,19 @@ export default function App() {
 
       let result;
       try {
-        result = await extractAllPagesData(loadedPdf, freshHeader);
+        result = await extractAllPagesData(loadedPdf, freshHeader, tableTopCutoff, tableBottomCutoff);
       } catch (extractionError) {
         console.warn('[PDF] Fast extraction failed:', extractionError);
         setIsScannedPdf(true);
-        setStatusMsg('Fast PDF extraction failed. Use Local OCR first, then AI verification only if needed.');
+        setStatusMsg('Fast PDF extraction failed. Use Local OCR first, then Verify OCR only if needed.');
         return;
       }
-      setTableData(result.rows);
+      setTableData(assignUniqueRandomCodes(result.rows));
       setDocHeaderInfo({ supplier: result.supplier, billNo: result.billNo, date: result.date });
 
       if (result.needsAiVerification) {
         setIsScannedPdf(true);
-        setStatusMsg('Fast extraction needs verification. Try Local OCR first; use AI verification only for unclear pages.');
+        setStatusMsg('Fast extraction needs verification. Try Local OCR first; use Verify OCR only for unclear pages.');
       } else {
         setIsScannedPdf(false);
         saveOcrCache(result.rows, {
@@ -337,7 +429,7 @@ export default function App() {
         }
 
         if (rows.length > 0) {
-          setTableData(rows);
+          setTableData(assignUniqueRandomCodes(rows));
           setStatusMsg(`Loaded ${rows.length} rows from Excel!`);
         } else {
           setStatusMsg("No valid data rows found in Excel file.");
@@ -432,7 +524,7 @@ export default function App() {
         }
 
         if (rows.length > 0) {
-          setTableData(rows);
+          setTableData(assignUniqueRandomCodes(rows));
           setStatusMsg(`Loaded ${rows.length} rows from text file!`);
         } else {
           setStatusMsg("No valid data rows found in text file.");
@@ -454,45 +546,52 @@ export default function App() {
     headerOverride?: InvoiceHeader
   ) => {
     const documentToProcess = documentOverride || pdfDoc;
-    if (!documentToProcess) {
-      setStatusMsg("Please upload a PDF invoice first.");
+    const isImageDocument = !documentToProcess && Boolean(imageSourceRef.current && canvasRef.current);
+    if (!documentToProcess && !isImageDocument) {
+      setStatusMsg("Please upload a PDF or image invoice first.");
       return;
     }
     if (aiRateLimited) {
-      setStatusMsg('Gemini is temporarily rate-limited. Use Local OCR or wait before retrying AI verification.');
+      setStatusMsg('OCR is temporarily rate-limited. Use Local OCR or wait before retrying Verify OCR.');
       return;
     }
 
     setIsProcessing(true);
-    setStatusMsg("Initializing Gemini AI Vision OCR...");
+    setStatusMsg("Initializing Verify OCR...");
 
     try {
       let combinedItems: any[] = [];
       let finalHeader = { ...(headerOverride || docHeaderInfo) };
 
-      const pagesToProcess = targetPages === 'all'
+      const pagesToProcess = documentToProcess && targetPages === 'all'
         ? Array.from({ length: documentToProcess.numPages }, (_, i) => i + 1)
         : [currentPage];
 
       const ocrResults = await mapWithConcurrency(pagesToProcess, AI_OCR_CONCURRENCY, async (pageNum) => {
-        setStatusMsg(`Rendering Page ${pageNum} for AI Vision OCR...`);
-        const page = await documentToProcess.getPage(pageNum);
+        setStatusMsg(`Rendering Page ${pageNum} for Verify OCR...`);
         const tempCanvas = document.createElement('canvas');
         const ctx = tempCanvas.getContext('2d')!;
-        const viewport = page.getViewport({ scale: 1.0 });
-        tempCanvas.width = viewport.width;
-        tempCanvas.height = viewport.height;
-        await page.render({ canvasContext: ctx, viewport }).promise;
+        if (documentToProcess) {
+          const page = await documentToProcess.getPage(pageNum);
+          const viewport = page.getViewport({ scale: 1.0, rotation: previewRotation });
+          tempCanvas.width = viewport.width;
+          tempCanvas.height = viewport.height;
+          await page.render({ canvasContext: ctx, viewport }).promise;
+        } else if (canvasRef.current) {
+          tempCanvas.width = canvasRef.current.width;
+          tempCanvas.height = canvasRef.current.height;
+          ctx.drawImage(canvasRef.current, 0, 0);
+        }
 
-        const cropTop = Math.floor(tempCanvas.height * 0.10);
-        const cropBottom = Math.ceil(tempCanvas.height * 0.85);
+        const cropTop = 0;
+        const cropBottom = Math.ceil(tempCanvas.height * (tableBottomCutoff / 100));
         const croppedCanvas = document.createElement('canvas');
         croppedCanvas.width = tempCanvas.width;
         croppedCanvas.height = cropBottom - cropTop;
         const cropCtx = croppedCanvas.getContext('2d')!;
         cropCtx.drawImage(tempCanvas, 0, cropTop, tempCanvas.width, cropBottom - cropTop, 0, 0, croppedCanvas.width, croppedCanvas.height);
 
-        setStatusMsg(`Analyzing Page ${pageNum} with Gemini AI Vision...`);
+        setStatusMsg(`Analyzing Page ${pageNum} with Verify OCR...`);
         const ocrData = await withRetry(() => performGeminiOcrOnCanvas(croppedCanvas));
         incrementOcrUsage(1);
         return ocrData;
@@ -517,15 +616,15 @@ export default function App() {
       );
 
       if (normalizedRows.length > 0) {
-        setTableData(targetPages === 'all' ? normalizedRows : [...tableData, ...normalizedRows]);
+        setTableData(assignUniqueRandomCodes(targetPages === 'all' ? normalizedRows : [...tableData, ...normalizedRows]));
         setDocHeaderInfo(finalHeader);
         if (targetPages === 'all') saveOcrCache(normalizedRows, finalHeader);
         setIsScannedPdf(false);
-        setStatusMsg(`Extracted ${normalizedRows.length} items using Gemini AI Vision OCR!`);
+        setStatusMsg(`Extracted ${normalizedRows.length} items using Verify OCR!`);
       } else {
         console.warn("No items extracted. Extracted data:", combinedItems);
         console.warn("Final header:", finalHeader);
-        setStatusMsg(`AI OCR returned data but no items detected. Try Local OCR or improve image clarity.`);
+        setStatusMsg(`Verify OCR returned data but no items detected. Try Local OCR or improve image clarity.`);
       }
     } catch (err) {
       console.error("AI OCR Error:", err);
@@ -535,11 +634,11 @@ export default function App() {
         const delay = getRetryDelayMilliseconds(message);
         setAiRetryUntil(Date.now() + delay);
         window.setTimeout(() => setAiRetryUntil(0), delay);
-        setStatusMsg(`Gemini quota reached. AI is paused; use Local OCR now, then retry AI after ${Math.ceil(delay / 1000)} seconds.`);
+        setStatusMsg(`OCR quota reached. Verify OCR is paused; use Local OCR now, then retry after ${Math.ceil(delay / 1000)} seconds.`);
       } else if (message.includes('Falling back to Local OCR')) {
         // Auto-fallback to Local OCR (Tesseract)
         console.log("AI failed, auto-fallback to Local OCR...");
-        setStatusMsg("AI unavailable. Attempting Local OCR (Tesseract)...");
+        setStatusMsg("Verify OCR unavailable. Attempting Local OCR...");
         try {
           const page = await pdfDoc.getPage(currentPage);
           const tempCanvas = document.createElement('canvas');
@@ -552,7 +651,7 @@ export default function App() {
           const text = await performTesseractOcrOnCanvas(tempCanvas, (msg) => setStatusMsg(`Local OCR: ${msg}`));
           const lines = text.split('\n').map(t => ({ text: t.trim(), y: 0 })).filter(l => l.text);
           const parsedRows = parseTesseractTextToStructuredData(lines);
-          setTableData([...tableData, ...parsedRows]);
+          setTableData(assignUniqueRandomCodes([...tableData, ...parsedRows]));
           setStatusMsg(`Local OCR extracted ${parsedRows.length} rows.`);
         } catch (localErr) {
           // Last resort: Extract raw text lines for user
@@ -568,7 +667,7 @@ export default function App() {
           }
         }
       } else {
-        setStatusMsg("AI OCR Error: " + message);
+        setStatusMsg("Verify OCR Error: " + message);
       }
     } finally {
       setIsProcessing(false);
@@ -576,8 +675,9 @@ export default function App() {
   };
 
   const handleRunTesseractOcr = async (targetPages: 'current' | 'all' = 'current') => {
-    if (!pdfDoc) {
-      setStatusMsg("Please upload a PDF invoice first.");
+    const isImageDocument = Boolean(imageSourceRef.current && canvasRef.current);
+    if (!pdfDoc && !isImageDocument) {
+      setStatusMsg("Please upload a PDF or image invoice first.");
       return;
     }
 
@@ -588,20 +688,26 @@ export default function App() {
       let combinedItems: any[] = [];
       let finalHeader = { ...docHeaderInfo };
 
-      const pagesToProcess = targetPages === 'all'
+      const pagesToProcess = pdfDoc && targetPages === 'all'
         ? Array.from({ length: totalPages }, (_, i) => i + 1)
         : [currentPage];
 
       for (const pageNum of pagesToProcess) {
         setTesseractProgress({ status: `Rendering Page ${pageNum}...`, progress: 0 });
 
-        const page = await pdfDoc.getPage(pageNum);
         const tempCanvas = document.createElement('canvas');
         const ctx = tempCanvas.getContext('2d')!;
-        const viewport = page.getViewport({ scale: 1.5 });
-        tempCanvas.width = viewport.width;
-        tempCanvas.height = viewport.height;
-        await page.render({ canvasContext: ctx, viewport }).promise;
+        if (pdfDoc) {
+          const page = await pdfDoc.getPage(pageNum);
+          const viewport = page.getViewport({ scale: 1.5, rotation: previewRotation });
+          tempCanvas.width = viewport.width;
+          tempCanvas.height = viewport.height;
+          await page.render({ canvasContext: ctx, viewport }).promise;
+        } else if (canvasRef.current) {
+          tempCanvas.width = canvasRef.current.width;
+          tempCanvas.height = canvasRef.current.height;
+          ctx.drawImage(canvasRef.current, 0, 0);
+        }
 
         setTesseractProgress({ status: `OCR Page ${pageNum} - Initializing...`, progress: 0 });
         const rawText = await performTesseractOcrOnCanvas(tempCanvas, setTesseractProgress);
@@ -627,12 +733,12 @@ export default function App() {
       );
 
       if (normalizedRows.length > 0) {
-        setTableData(targetPages === 'all' ? normalizedRows : [...tableData, ...normalizedRows]);
+        setTableData(assignUniqueRandomCodes(targetPages === 'all' ? normalizedRows : [...tableData, ...normalizedRows]));
         setDocHeaderInfo(finalHeader);
         setIsScannedPdf(false);
         setStatusMsg(`Extracted ${normalizedRows.length} items using Tesseract OCR!`);
       } else {
-        setStatusMsg("Tesseract OCR complete, but no items detected. Try AI Vision OCR for better accuracy.");
+        setStatusMsg("Local OCR complete, but no items detected. Try Verify OCR for better accuracy.");
       }
     } catch (err) {
       console.error("Tesseract OCR Error:", err);
@@ -645,41 +751,63 @@ export default function App() {
 
   useEffect(() => {
     if (pdfDoc && canvasRef.current) {
-      renderPdfPageToCanvas(pdfDoc, currentPage, canvasRef.current, 15, 85).catch(err => console.error("Canvas render error:", err));
+      renderPdfPageToCanvas(pdfDoc, currentPage, canvasRef.current, tableTopCutoff, tableBottomCutoff, previewRotation).catch(err => console.error("Canvas render error:", err));
+    } else if (imageSourceRef.current) {
+      drawImagePreview(imageSourceRef.current, previewRotation);
     }
-  }, [pdfDoc, currentPage]);
+  }, [pdfDoc, currentPage, previewRotation]);
+
+  const handleSaveMetadata = () => {
+    localStorage.setItem('invoice_metadata', JSON.stringify(docHeaderInfo));
+    setTableData(prev => assignUniqueRandomCodes(prev.map(row => ({
+      ...row,
+      SUPPLIER: docHeaderInfo.supplier,
+      "BILL NO.": docHeaderInfo.billNo,
+      DATE: docHeaderInfo.date,
+    }))));
+    setStatusMsg('Saved. Supplier, Bill No. and Date updated in table rows.');
+  };
 
   const handleExportExcel = () => {
-    localStorage.setItem('invoice_metadata', JSON.stringify(docHeaderInfo));
-
-    const exportData = tableData.map(row => {
-      const updatedRow = { ...row };
-      if (!updatedRow["SUPPLIER"]) updatedRow["SUPPLIER"] = docHeaderInfo.supplier;
-      if (!updatedRow["BILL NO."]) updatedRow["BILL NO."] = docHeaderInfo.billNo;
-      if (!updatedRow["DATE"]) updatedRow["DATE"] = docHeaderInfo.date;
+    if (!tableData.length) {
+      setStatusMsg('Export tab tak nahi hoga jab tak table me data na ho.');
+      return;
+    }
+    const exportData = assignUniqueRandomCodes(tableData.map((row, idx) => {
+      const updatedRow: ErpRow = {};
+      ERP_COLUMNS.forEach(col => {
+        updatedRow[col] = String(row[col] ?? '').replace(/[\r\n\t]+/g, ' ').trim();
+      });
+      if (!updatedRow["SUPPLIER"]) updatedRow["SUPPLIER"] = docHeaderInfo.supplier || '';
+      if (!updatedRow["BILL NO."]) updatedRow["BILL NO."] = docHeaderInfo.billNo || '';
+      if (!updatedRow["DATE"]) updatedRow["DATE"] = docHeaderInfo.date || '';
+      updatedRow["ITEM NAME"] = String(updatedRow["ITEM NAME"] || '').replace(/\s+/g, ' ').trim();
+      if (!updatedRow["PSRLNO"]) updatedRow["PSRLNO"] = String(idx + 1);
       return updatedRow;
-    });
+    }));
+    setTableData(exportData);
 
-    const worksheet = XLSX.utils.json_to_sheet(exportData, { header: ERP_COLUMNS });
-    const colWidths = ERP_COLUMNS.map(col => ({
+    const sheetRows = [
+      ERP_COLUMNS,
+      ...exportData.map(row => ERP_COLUMNS.map(col => {
+        const value = row[col] || '';
+        if ((col === 'CODE' || ZERO_FILL_COLUMNS.includes(col)) && /^-?\d+(\.\d+)?$/.test(value)) {
+          return Number(value);
+        }
+        return value;
+      }))
+    ];
+    const worksheet = XLSX.utils.aoa_to_sheet(sheetRows);
+    worksheet['!cols'] = ERP_COLUMNS.map(col => ({
       wch: Math.max(col.length + 2, col === 'ITEM NAME' ? 36 : 12)
     }));
-    worksheet['!cols'] = colWidths;
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Pharma ERP Clean");
-
-    const headerSheet = XLSX.utils.json_to_sheet([
-      { Field: "Supplier Name", Value: docHeaderInfo.supplier || "" },
-      { Field: "Bill No.", Value: docHeaderInfo.billNo || "" },
-      { Field: "Bill Date", Value: docHeaderInfo.date || "" }
-    ], { header: ["Field", "Value"] });
-    headerSheet['!cols'] = [{ wch: 18 }, { wch: 30 }];
-    XLSX.utils.book_append_sheet(workbook, headerSheet, "Invoice Metadata");
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
 
     const fileName = `Clean_Invoice_${docHeaderInfo.billNo || 'Pharma'}.xlsx`;
     XLSX.writeFile(workbook, fileName);
-    setStatusMsg(`Saved & exported ${fileName} with Invoice Metadata!`);
+    setStatusMsg(`Exported ${fileName}`);
   };
 
 const handleConvertPdfToCsv = async () => {
@@ -710,7 +838,7 @@ const handleConvertPdfToCsv = async () => {
       canvas.height = viewport.height;
       await page.render({ canvasContext: ctx, viewport }).promise;
 
-      setCsvStatus(`Running AI OCR on page ${p} of ${pdf.numPages}...`);
+      setCsvStatus(`Running OCR on page ${p} of ${pdf.numPages}...`);
       const rawText = await withRetry(() => 
         performGeminiVerbatimOcrOnCanvas(canvas, (msg) => 
        {   
@@ -773,7 +901,15 @@ const handleConvertPdfToCsv = async () => {
       emptyRow["DATE"] = docHeaderInfo.date;
       emptyRow["PSRLNO"] = String(tableData.length + 1);
     }
-    setTableData([...tableData, emptyRow]);
+    setTableData(assignUniqueRandomCodes([...tableData, emptyRow]));
+  };
+
+  const handleClearTable = () => {
+    if (!window.confirm('Clear table rows and invoice metadata (supplier, bill no, date)?')) return;
+    setTableData([]);
+    setDocHeaderInfo({ supplier: '', billNo: '', date: '' });
+    try { localStorage.removeItem('invoice_metadata'); } catch (_) {}
+    setStatusMsg('Table and invoice metadata cleared.');
   };
 
   const handleDeleteRow = (index: number) => {
@@ -787,34 +923,52 @@ const handleConvertPdfToCsv = async () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
+    <div className="app-shell min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
+      {THEME_OPTIONS.find((t) => t.id === bgOption)?.hasShapes && (
+        <div className="bg-shapes-layer" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+          <span />
+        </div>
+      )}
       <header className="bg-slate-800 border-b border-slate-700 px-6 py-3 flex items-center justify-between sticky top-0 z-50">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <div className="bg-indigo-600 p-2 rounded-lg text-white font-bold shadow-lg shadow-indigo-500/30">
+          <div className="bg-cyan-800 p-2 rounded-lg text-white font-bold">
             <Pill className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-lg font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
+            <h1 className="text-lg font-bold text-cyan-900">
               Pharma Invoice Extractor Pro
             </h1>
-            <p className="text-xs text-slate-400">Isolated Product Title & 34-Col Pharma ERP Auto-Clean Engine</p>
+            <p className="text-xs text-slate-400">34-column pharma invoice extractor</p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="relative flex items-center gap-1.5">
+            <span className="text-xs font-semibold text-slate-700">Theme</span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setShowThemeMenu(!showThemeMenu); setShowMasterMenu(false); }}
+              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-slate-400 bg-white/80"
+              title="Choose theme"
+            >
+              <span
+                className="bg-swatch"
+                style={{ background: THEME_OPTIONS.find((t) => t.id === bgOption)?.swatch }}
+              />
+              <svg className="w-3 h-3 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            <ThemeMenu
+              show={showThemeMenu}
+              value={bgOption}
+              onSelect={(id) => { setBgOption(id); setShowThemeMenu(false); }}
+            />
+          </div>
           <button
-            onClick={() => handleRunAiOcr('current')}
-            disabled={isProcessing || aiRateLimited || !pdfDoc}
-            className="flex items-center space-x-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white px-3.5 py-2 rounded-lg text-sm font-semibold transition shadow-md shadow-purple-600/30 disabled:opacity-50"
-            title="Verify only the current page with AI"
-          >
-            <Zap className="w-4 h-4 text-yellow-300" />
-            <span>AI Verify Current Page</span>
-          </button>
-
-                    <button
             onClick={() => window.location.reload()}
-            className="flex items-center space-x-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-md text-xs font-semibold transition shadow-sm"
+            className="header-btn-refresh flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition"
             title="Refresh page"
           >
             <RefreshCw className="w-4 h-4" />
@@ -823,11 +977,11 @@ const handleConvertPdfToCsv = async () => {
 
           <div className="relative">
             <button
-              onClick={(e) => { e.stopPropagation(); setShowMasterMenu(!showMasterMenu); }}
-              className="flex items-center space-x-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-3 py-1.5 rounded-md text-xs font-semibold transition shadow-sm shadow-emerald-600/20"
+              onClick={(e) => { e.stopPropagation(); setShowMasterMenu(!showMasterMenu); setShowThemeMenu(false); }}
+              className="header-btn-upload flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition"
             >
-              <Sparkles className="w-4 h-4 text-yellow-300" />
-              <span>Master</span>
+              <Sparkles className="w-4 h-4" />
+              <span>Upload</span>
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
             </button>
             {showMasterMenu && (
@@ -865,6 +1019,7 @@ const handleConvertPdfToCsv = async () => {
             className="hidden"
           />
 
+          {/* Top-bar Export — use Invoice Metadata Export instead
           <button
             onClick={handleExportExcel}
             className="flex items-center space-x-2 bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded-md text-xs font-semibold transition shadow-sm shadow-amber-600/20"
@@ -872,7 +1027,9 @@ const handleConvertPdfToCsv = async () => {
             <Download className="w-4 h-4" />
             <span>Export Excel (.xlsx)</span>
           </button>
+          */}
 
+          {/* PDF → CSV — hidden from main page
           <button
             onClick={() => setActiveView(activeView === 'csv' ? 'extractor' : 'csv')}
             className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition shadow-sm ${
@@ -884,23 +1041,25 @@ const handleConvertPdfToCsv = async () => {
             <TableIcon className="w-4 h-4" />
             <span>{activeView === 'csv' ? 'Back to Extractor' : 'PDF → CSV'}</span>
           </button>
+          */}
         </div>
       </header>
 
       <div className="bg-slate-800/60 border-b border-slate-700/50 px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
         <div className="flex items-center space-x-3">
           <span className="flex items-center space-x-1.5 text-slate-300 bg-slate-900/60 px-3 py-1 rounded-md border border-slate-700">
-            <RefreshCw className={`w-3.5 h-3.5 ${isProcessing ? 'animate-spin text-indigo-400' : 'text-slate-400'}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${isProcessing ? 'animate-spin text-cyan-800' : 'text-slate-400'}`} />
             <span>{statusMsg}</span>
           </span>
-          <span className="bg-emerald-950/80 text-emerald-400 border border-emerald-700/50 px-2.5 py-1 rounded-md font-medium">
+          <span className="bg-slate-200 text-slate-800 border border-slate-400 px-2.5 py-1 rounded-md font-medium">
             {tableData.length} Product Rows
           </span>
-          <span className="bg-indigo-950/80 text-indigo-300 border border-indigo-700/50 px-2.5 py-1 rounded-md font-medium">
+          <span className="bg-white/55 text-slate-800 border border-slate-300 px-2.5 py-1 rounded-md font-medium">
             OCR Today: {ocrUsageCount} / ~1,500 pages
           </span>
         </div>
 
+        {SHOW_RAW_PDF_TEXT_TAB && (
         <div className="flex items-center bg-slate-900/80 p-1 rounded-lg border border-slate-700 w-full sm:w-auto">
           <button
             onClick={() => setActiveTab('studio')}
@@ -921,6 +1080,7 @@ const handleConvertPdfToCsv = async () => {
             <span>Raw PDF Text Data</span>
           </button>
         </div>
+        )}
       </div>
 
       <div className="flex-1 flex overflow-hidden">
@@ -929,7 +1089,7 @@ const handleConvertPdfToCsv = async () => {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-base font-bold text-slate-200">PDF to GST CSV Converter</h2>
-                <p className="text-xs text-slate-400">Non-AI table extraction — preview columns before download</p>
+                <p className="text-xs text-slate-400">Table extraction — preview columns before download</p>
               </div>
             </div>
 
@@ -1029,151 +1189,228 @@ const handleConvertPdfToCsv = async () => {
               })()}
             </div>
           </div>
-        ) : activeTab === 'studio' ? (
-          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-
-            <div className="w-full lg:w-4/12 bg-slate-900 border-r border-slate-800 flex flex-col p-3 sm:p-4 overflow-y-auto space-y-4">
-
-              {isScannedPdf && (
-                <div className="bg-purple-950/80 border border-purple-600/80 p-3.5 rounded-xl text-purple-200 text-xs flex flex-col space-y-2">
-                  <div className="flex items-start space-x-2">
-                    <Scan className="w-5 h-5 text-purple-400 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <strong className="font-bold block text-purple-300">Scanned / Image Invoice Detected</strong>
-                      <span>Digital text layer missing. Choose an OCR method below to extract data.</span>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col space-y-2 pt-1">
-                    <div>
-                      <p className="text-[10px] text-emerald-300 mb-1 font-semibold uppercase tracking-wider">Fast Local OCR (Free)</p>
-                      <button
-                        onClick={() => handleRunTesseractOcr('current')}
-                        disabled={isProcessing}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white py-1 px-2.5 rounded text-[11px] font-semibold flex items-center justify-center space-x-1 transition disabled:opacity-50"
-                      >
-                        <Scan className="w-3.5 h-3.5" />
-                        <span>Local OCR (Current Page)</span>
-                      </button>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-purple-300 mb-1 font-semibold uppercase tracking-wider">Optional: AI Verification</p>
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => handleRunAiOcr('current')}
-                          disabled={isProcessing || aiRateLimited}
-                          className="bg-purple-600 hover:bg-purple-500 text-white py-1 px-2.5 rounded text-[11px] font-semibold flex items-center justify-center space-x-1 transition disabled:opacity-50"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
-                          <span>AI OCR (Current Page)</span>
-                        </button>
-                        <button
-                          onClick={() => handleRunAiOcr('all')}
-                          disabled={isProcessing || aiRateLimited}
-                          className="bg-indigo-600 hover:bg-indigo-500 text-white py-1 px-2.5 rounded text-[11px] font-semibold flex items-center justify-center space-x-1 transition disabled:opacity-50"
-                        >
-                          <Zap className="w-3.5 h-3.5 text-amber-300" />
-                          <span>AI OCR (All Pages)</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {tesseractProgress.status && (
-                    <div className="bg-slate-900/60 border border-slate-700/50 p-2 rounded text-[11px] text-slate-300">
-                      <div className="flex items-center space-x-2">
-                        <RefreshCw className={`w-3 h-3 ${isProcessing ? 'animate-spin text-emerald-400' : 'text-slate-400'}`} />
-                        <span>{tesseractProgress.status}</span>
-                      </div>
-                      {tesseractProgress.progress > 0 && (
-                        <div className="mt-1.5 w-full bg-slate-800 rounded-full h-1.5">
-                          <div
-                            className="bg-emerald-500 h-1.5 rounded-full transition-all duration-300"
-                            style={{ width: `${Math.round(tesseractProgress.progress * 100)}%` }}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
+        ) : !SHOW_RAW_PDF_TEXT_TAB || activeTab === 'studio' ? (
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+            <div className="px-3 pt-2 pb-2 space-y-2 shrink-0">
               <MetadataPanel
                 header={docHeaderInfo}
                 onChange={setDocHeaderInfo}
-                onSave={handleExportExcel}
+                onSave={handleSaveMetadata}
+                onExport={handleExportExcel}
+                canExport={tableData.length > 0}
               />
-
-              <div className="bg-slate-800/80 border border-slate-700/80 p-3.5 rounded-xl space-y-3 text-xs">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-slate-300 uppercase tracking-wider flex items-center space-x-2">
-                    <Filter className="w-4 h-4 text-emerald-400" />
-                    <span>Table Y-Cutoff Boundaries</span>
-                  </h3>
+              {isScannedPdf && (
+                <div className="ocr-banner border rounded-xl px-3 py-2 flex flex-wrap items-center gap-2 text-xs">
+                  <Scan className="w-4 h-4 text-cyan-800 flex-shrink-0" />
+                  <span className="font-semibold">Scanned invoice — choose OCR:</span>
+                  <button
+                    onClick={() => handleRunTesseractOcr('current')}
+                    disabled={isProcessing}
+                    className="ocr-btn ocr-btn-local py-1 px-2.5 rounded text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
+                  >
+                    <Scan className="w-3.5 h-3.5" />
+                    <span>Local OCR (Current Page)</span>
+                  </button>
+                  <button
+                    onClick={() => handleRunAiOcr('current')}
+                    disabled={isProcessing || aiRateLimited}
+                    className="ocr-btn ocr-btn-verify py-1 px-2.5 rounded text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Verify OCR (Current Page)</span>
+                  </button>
+                  <button
+                    onClick={() => handleRunAiOcr('all')}
+                    disabled={isProcessing || aiRateLimited}
+                    className="ocr-btn ocr-btn-all py-1 px-2.5 rounded text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>Verify OCR (All Pages)</span>
+                  </button>
+                  {tesseractProgress.status && (
+                    <span className="flex items-center space-x-1.5 text-[11px]">
+                      <RefreshCw className={`w-3 h-3 ${isProcessing ? 'animate-spin text-cyan-800' : ''}`} />
+                      <span>{tesseractProgress.status}</span>
+                    </span>
+                  )}
                 </div>
-              </div>
+              )}
+            </div>
+
+          <div className="flex-1 flex flex-col md:flex-row md:items-start overflow-hidden min-h-0">
+
+            <div
+              className={
+                isPreviewExpanded
+                  ? `preview-panel has-split w-full md:flex-none self-start border-r border-slate-200 flex flex-col p-2 overflow-hidden min-w-0 h-auto ${(pdfDoc || isScannedPdf) ? 'has-doc max-h-[40vh] md:max-h-full' : ''}`
+                  : 'hidden'
+              }
+              style={isPreviewExpanded ? { ['--preview-w']: `${previewWidth}px` } : undefined}
+            >
 
               <div
-                className="bg-slate-800/80 border border-slate-700/80 p-3.5 rounded-xl flex flex-col flex-1 space-y-2"
+                className={`preview-panel-card border border-slate-200 rounded-xl flex flex-col h-auto ${
+                  isPreviewExpanded ? 'p-2' : 'p-0 border-0'
+                }`}
               >
-                <div className="flex items-center justify-between text-xs text-slate-300">
-                  <span className="font-bold flex items-center space-x-1.5">
-                    <Eye className="w-4 h-4 text-cyan-400" />
-                    <span>Visual Page Preview</span>
-                  </span>
+                {isPreviewExpanded && (
+                <div className="flex flex-wrap items-center gap-1.5 text-xs shrink-0 mb-2 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsPreviewExpanded(false)}
+                    className="preview-toggle font-bold flex items-center gap-1 px-1 py-1 rounded min-w-0"
+                  >
+                    <Eye className="w-4 h-4 shrink-0" />
+                    <span className="truncate">Visual Page Preview</span>
+                    <ChevronDown className="w-3.5 h-3.5 rotate-180 shrink-0" />
+                  </button>
                   {pdfDoc && (
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center gap-1 ml-auto">
                       <button
-                        onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                        onClick={() => { setCurrentPage(Math.max(1, currentPage - 1)); setPreviewRotation(0); }}
                         disabled={currentPage <= 1}
-                        className="p-1 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-40"
+                        className="preview-toggle p-1 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-40"
                       >
                         <ChevronLeft className="w-3.5 h-3.5" />
                       </button>
-                      <span>{currentPage} / {totalPages}</span>
+                      <span className="preview-toggle whitespace-nowrap">{currentPage} / {totalPages}</span>
                       <button
-                        onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                        onClick={() => { setCurrentPage(Math.min(totalPages, currentPage + 1)); setPreviewRotation(0); }}
                         disabled={currentPage >= totalPages}
-                        className="p-1 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-40"
+                        className="preview-toggle p-1 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-40"
                       >
                         <ChevronRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   )}
+                  {(pdfDoc || imageSourceRef.current) && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setPreviewZoom((z) => Math.max(0.6, Math.round((z - 0.15) * 100) / 100))}
+                        className="preview-toggle p-1 rounded bg-slate-700 hover:bg-slate-600"
+                        title="Zoom out"
+                      >
+                        <ZoomOut className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="preview-toggle w-9 text-center tabular-nums">{Math.round(previewZoom * 100)}%</span>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewZoom((z) => Math.min(2, Math.round((z + 0.15) * 100) / 100))}
+                        className="preview-toggle p-1 rounded bg-slate-700 hover:bg-slate-600"
+                        title="Zoom in"
+                      >
+                        <ZoomIn className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => rotatePreview(-90)}
+                        disabled={isProcessing}
+                        className="preview-toggle p-1 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-40"
+                        title="Rotate preview left"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => rotatePreview(90)}
+                        disabled={isProcessing}
+                        className="preview-toggle p-1 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-40"
+                        title="Rotate preview right"
+                      >
+                        <RotateCw className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
+                )}
 
                 <div
-                  onClick={() => !pdfDoc && fileInputRef.current?.click()}
-                  className={`flex-1 bg-slate-950 rounded-lg overflow-auto border ${isDragging ? 'border-indigo-500 border-dashed' : 'border-slate-800'} flex items-center justify-center p-2 min-h-[260px] cursor-pointer group`}
+                  onClick={() => !pdfDoc && !isScannedPdf && fileInputRef.current?.click()}
+                  className={`${isPreviewExpanded ? 'w-full min-w-0' : 'hidden'} preview-stage rounded-lg border border-slate-200 cursor-pointer group ${(pdfDoc || isScannedPdf) ? 'max-h-[calc(100vh-14rem)] overflow-auto' : ''}`}
                 >
-                  <canvas ref={canvasRef} className={`max-w-full h-auto rounded border border-slate-700/50 shadow-lg ${!pdfDoc && !isScannedPdf ? 'hidden' : 'block'}`} />
-
-                  {!pdfDoc && !isScannedPdf && (
-                    <div className="text-center p-6 text-slate-500 text-xs space-y-3 group-hover:text-slate-300 transition">
-                      <div className="p-3 bg-slate-900 border border-slate-800 rounded-full w-12 h-12 mx-auto flex items-center justify-center group-hover:border-indigo-500 transition">
-                        <Upload className="w-6 h-6 text-slate-400 group-hover:text-indigo-400 transition" />
-                      </div>
-                      <div>
-                        <p className="font-semibold text-slate-300">Click or Drag & Drop invoice file here</p>
-                        <p className="text-[11px] text-slate-500 mt-0.5">Supports PDF documents and JPG/PNG invoice images</p>
-                      </div>
+                  {(pdfDoc || isScannedPdf) ? (
+                    <div ref={previewWrapRef} className="relative w-full bg-white">
+                      <canvas
+                        ref={canvasRef}
+                        className="preview-canvas h-auto rounded"
+                        style={{ width: `${previewZoom * 100}%` }}
+                      />
+                      <button
+                        type="button"
+                        className="cutoff-line cutoff-line-top"
+                        style={{ top: `${tableTopCutoff}%` }}
+                        onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); cutoffDragRef.current = 'top'; }}
+                        title="Drag to set table start (header above this line)"
+                      >
+                        <span className="cutoff-label">Header above · Table below</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="cutoff-line cutoff-line-bottom"
+                        style={{ top: `${tableBottomCutoff}%` }}
+                        onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); cutoffDragRef.current = 'bottom'; }}
+                        title="Drag to set table end"
+                      >
+                        <span className="cutoff-label">Table end</span>
+                      </button>
                     </div>
+                  ) : (
+                    <>
+                      <canvas ref={canvasRef} className="preview-canvas-idle" width={1} height={1} />
+                      <div className="preview-dropzone w-full min-w-0 p-4 text-center bg-white">
+                        <div className="p-2.5 border border-slate-200 rounded-full w-10 h-10 mx-auto flex items-center justify-center mb-2 bg-white">
+                          <Upload className="w-5 h-5 text-slate-500" />
+                        </div>
+                        <p className="font-semibold text-slate-800 text-xs break-words">Click or drop invoice here</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5 break-words">PDF, JPG, PNG</p>
+                      </div>
+                    </>
                   )}
                 </div>
               </div>
 
             </div>
 
-            <div className="flex-1 bg-slate-950 flex flex-col overflow-hidden">
+            {isPreviewExpanded && (
+              <div
+                className="preview-splitter hidden md:block"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  splitDragRef.current = true;
+                  splitStartRef.current = { x: e.clientX, w: previewWidth };
+                }}
+                title="Drag to resize preview"
+              />
+            )}
+
+            <div className="flex-1 min-w-0 min-h-0 self-stretch bg-slate-950 flex flex-col overflow-hidden">
 
               <div className="bg-slate-800/90 border-b border-slate-700/80 px-4 py-2.5 flex items-center justify-between">
                 <div className="flex items-center space-x-2">
+                  {!isPreviewExpanded && (
+                    <button
+                      type="button"
+                      onClick={() => setIsPreviewExpanded(true)}
+                      className="preview-toggle flex items-center space-x-1 bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded-md text-[11px] font-semibold transition"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Show Preview</span>
+                    </button>
+                  )}
                   <button
                     onClick={handleAddRow}
                     className="flex items-center space-x-1 bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-medium transition"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Add Row</span>
+                  </button>
+                  <button
+                    onClick={handleClearTable}
+                    disabled={tableData.length === 0 && !docHeaderInfo.supplier && !docHeaderInfo.billNo && !docHeaderInfo.date}
+                    className="flex items-center space-x-1 bg-rose-600 hover:bg-rose-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Clear Table</span>
                   </button>
                 </div>
 
@@ -1199,6 +1436,7 @@ const handleConvertPdfToCsv = async () => {
 
             </div>
 
+          </div>
           </div>
         ) : (
           <div className="flex-1 bg-slate-950 p-4 sm:p-6 overflow-y-auto flex flex-col space-y-4">

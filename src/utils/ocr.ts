@@ -22,53 +22,80 @@ export interface RawTextLine {
 
 // ==================== HEADER DETECTION ====================
 
+const DATE_VALUE_RE = /\b(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}|\d{4}[-/.]\d{1,2}[-/.]\d{1,2})\b/;
+const BILL_NO_REJECT = /^(NO|NUMBER|DATE|DT|INV|INVOICE|BILL|TAX)$/i;
+const SKIP_SUPPLIER_LINE = /TAX INVOICE|INVOICE NO|BILL NO|GSTIN|DL\s*NO|DRUG LIC|PAGE\s+\d|ORIGINAL FOR|DUPLICATE|IRN|E-?WAY|BUYER|SHIP TO|BILL TO|AUTHORI[SZ]ED|BANK DETAILS|GRAND TOTAL/;
+const SUPPLIER_HINT = /PHARMA|PHARMACY|DISTRIBUTOR|AGENC|LIMITED|LTD\.?|PVT|PRIVATE|WHOLESALE|MEDICAL|CHEMIST|ENTERPRISES|TRADERS|MART|STORE|HOSPITAL/;
+
+function cleanHeaderValue(value: string): string {
+  return String(value || '').replace(/[:.\-]\s*$/, '').replace(/[^a-zA-Z0-9\s&().,'/-]/g, '').trim();
+}
+
+function pickBillNo(text: string): string {
+  const patterns = [
+    /(?:tax\s*)?invoice\s*(?:no\.?|number|#)\s*[:.\-]?\s*([A-Z0-9][A-Z0-9\/\-]{2,24})/i,
+    /bill\s*(?:no\.?|number|#)\s*[:.\-]?\s*([A-Z0-9][A-Z0-9\/\-]{2,24})/i,
+    /\binv(?:oice)?\.?\s*(?:no\.?|#)\s*[:.\-]?\s*([A-Z0-9][A-Z0-9\/\-]{2,24})/i,
+    /\bb\.?\s*no\.?\s*[:.\-]?\s*([A-Z0-9][A-Z0-9\/\-]{2,24})/i
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1] && !BILL_NO_REJECT.test(match[1])) return match[1].replace(/[,.]$/, '');
+  }
+  return '';
+}
+
 export function detectInvoiceMetadata(lines: RawTextLine[]): InvoiceHeader {
   const header: InvoiceHeader = { supplier: '', billNo: '', date: '' };
-  const junkWords = [
-    'BANK', 'OUR', 'DETAILS', 'TERMS', 'CONDITIONS', 'AUTHORIZED', 'SIGNATURE',
-    'DECLARATION', 'NOTE', 'MSG', 'INTEREST', 'POSSESSION', 'JURISDICTION', 'ACK',
-    'IRN', 'SCHEME', 'CLASS', 'ROUND', 'TAXABLE', 'WEIGHT', 'CASES', 'EXCHANGED',
-    'TRANSPORT', 'VEHICLE', 'RECEIVER', 'BILLED', 'GOODS', 'INVOICE', 'ORDER',
-    'EWAY', 'WAY', 'GRAND', 'SUB', 'TOTAL', 'AMOUNT', 'VALUE', 'QTY', 'RATE',
-    'MRP', 'FREE', 'BATCH', 'EXP', 'PACK', 'HSN', 'SR', 'ITEM', 'PRODUCT',
-    'CODE', 'BARCODE', 'COMPANY', 'SUPPLIER', 'BILL', 'DATE', 'NO', 'YES', 'NA',
-    'N/A', 'NIL', 'DIS', 'RS', 'PER', 'MFR', 'MFG', 'BRAND'
-  ];
+  const zone = lines.slice(0, 40).map(line => String(line?.text || '').trim()).filter(Boolean);
 
-  for (const line of lines.slice(0, 30)) {
-    const upper = line.text.toUpperCase();
+  for (let i = 0; i < zone.length && !header.billNo; i++) {
+    const combined = zone[i + 1] ? `${zone[i]} ${zone[i + 1]}` : zone[i];
+    header.billNo = pickBillNo(combined) || pickBillNo(zone[i]);
+  }
 
-    // Bill number detection
-    if (!header.billNo && (upper.includes('BILL') || upper.includes('INVOICE') || upper.includes('INV'))) {
-      const match = line.text.match(/(?:BILL|INV|INVOICE)\s*(?:NO|NUMBER)?[:.\-\s]*([A-Z0-9\/\-]+)/i);
-      if (match && match[1]) {
-        header.billNo = match[1].trim();
-        continue;
-      }
+  for (let i = 0; i < zone.length && !header.date; i++) {
+    const combined = zone[i + 1] ? `${zone[i]} ${zone[i + 1]}` : zone[i];
+    const labeled = combined.match(/(?:invoice|bill|inv)?\s*(?:date|dated|dt\.?)\s*[:.\-]?\s*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}|\d{4}[-/.]\d{1,2}[-/.]\d{1,2})/i);
+    if (labeled?.[1]) {
+      header.date = labeled[1];
+      continue;
     }
-    // Fallback: "No:" or "Number:" pattern
-    if (!header.billNo && /\b(?:NO|NUMBER)\b/i.test(line.text)) {
-      const match = line.text.match(/\b(?:NO|NUMBER)\b\s*[:.\-\s]*([A-Z0-9]{3,20}(?:\/[A-Z0-9]+)?)/i);
-      if (match && match[1]) {
-        header.billNo = match[1].trim();
-        continue;
-      }
+    if (/\b(?:invoice|bill)?\s*(?:date|dated|dt\.?)\b/i.test(combined)) {
+      const match = combined.match(DATE_VALUE_RE);
+      if (match) header.date = match[1];
     }
+  }
 
-    // Date detection
-    if (!header.date && (upper.includes('DATE') || upper.includes('DATED'))) {
-      const match = line.text.match(/\d{2}[-/\.]\d{2}[-/\.]\d{2,4}/);
+  if (!header.date) {
+    for (const line of zone) {
+      const match = line.match(/\b(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\b/);
       if (match) {
-        header.date = match[0];
-        continue;
+        header.date = match[1];
+        break;
       }
     }
+  }
 
-    // Supplier detection
-    if (!header.supplier && (upper.includes('PHARMA') || upper.includes('DISTRIBUTOR') || upper.includes('AGENCIES') || upper.includes('LIMITED'))) {
-      const hasJunk = junkWords.some(word => upper.includes(word));
-      if (!hasJunk && line.text.length > 5 && line.text.length < 80) {
-        header.supplier = line.text.replace(/[^a-zA-Z0-9\s&().,/-]/g, '').trim();
+  const supplierLabel = /(?:supplier|seller|from|billed\s*by|sold\s*by|party\s*name|consignor|vendor)\s*[:.\-]?\s*(.*)/i;
+  for (let i = 0; i < Math.min(zone.length, 20) && !header.supplier; i++) {
+    const labeled = zone[i].match(supplierLabel);
+    if (!labeled) continue;
+    let name = cleanHeaderValue(labeled[1]);
+    if (name.length < 4 && zone[i + 1]) name = cleanHeaderValue(zone[i + 1]);
+    if (name.length > 3 && name.length < 80 && !SKIP_SUPPLIER_LINE.test(name.toUpperCase())) {
+      header.supplier = name;
+    }
+  }
+
+  if (!header.supplier) {
+    for (let i = 0; i < Math.min(zone.length, 15); i++) {
+      const line = zone[i];
+      const upper = line.toUpperCase();
+      if (SKIP_SUPPLIER_LINE.test(upper)) continue;
+      if (SUPPLIER_HINT.test(upper) && line.length > 5 && line.length < 80) {
+        header.supplier = cleanHeaderValue(line);
+        break;
       }
     }
   }
@@ -147,7 +174,7 @@ export function normalizeToErpRows(
     })
     .filter(row => row["ITEM NAME"])
     .map((row, idx) => {
-      row["PSRLNO"] = String(startIndex + idx);
+      row["PSRLNO"] = String(startIndex + idx + 1);
       return row;
     });
 }
@@ -161,16 +188,31 @@ export function groupTextIntoLines(
   const lineMap = new Map<number, any[]>();
 
   items.forEach((item: any) => {
-    // Skip invalid items
-    if (!item || !item.transform || !Array.isArray(item.transform) || item.transform.length < 6) {
-      console.warn("Skipping invalid text item:", item);
+    let textItem: { text: string; x: number; y: number; width: number } | null = null;
+
+    if (item && Array.isArray(item.transform) && item.transform.length >= 6) {
+      const tx = item.transform;
+      const x = tx[4];
+      const y = pageHeight - tx[5];
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      textItem = {
+        text: item.str || item.text || '',
+        x: Math.round(x),
+        y: Math.round(y),
+        width: item.width || ((item.str || item.text || '').length * 6)
+      };
+    } else if (item && Number.isFinite(item.x) && Number.isFinite(item.y)) {
+      textItem = {
+        text: item.text || item.str || '',
+        x: Math.round(item.x),
+        y: Math.round(item.y),
+        width: item.width || ((item.text || item.str || '').length * 6)
+      };
+    } else {
       return;
     }
-    
-    const tx = item.transform;
-    const x = tx[4];
-    const y = pageHeight - tx[5];
-    const textItem = { text: item.str, x: Math.round(x), y: Math.round(y), width: item.width || (item.str.length * 6) };
+
+    if (!textItem.text.trim()) return;
 
     let foundLineY: number | null = null;
     for (const yKey of lineMap.keys()) {
@@ -435,34 +477,10 @@ export function parseTesseractTextToStructuredData(
     .map(l => l.trim())
     .filter(l => l.length > 2);
 
-  let detectedSupplier = headerInfo.supplier || '';
-  let detectedBillNo = headerInfo.billNo || '';
-  let detectedDate = headerInfo.date || '';
-
-  for (let i = 0; i < Math.min(lines.length, 30); i++) {
-    const line = lines[i];
-    const upper = line.toUpperCase();
-
-    if (!detectedSupplier && (upper.includes('PHARMA') || upper.includes('DISTRIBUTOR') || upper.includes('AGENCIES') || upper.includes('LIMITED'))) {
-      if (line.length > 5 && line.length < 80 && !upper.includes('BILL')) {
-        detectedSupplier = line.replace(/[^a-zA-Z0-9\s&().,/-]/g, '').trim();
-      }
-    }
-
-    if (!detectedBillNo && (upper.includes('BILL') || upper.includes('INVOICE') || upper.includes('INV'))) {
-      const match = line.match(/(?:BILL|INV|INVOICE)\s*(?:NO|NUMBER)?[:.\-\s]*([A-Z0-9\/\-]+)/i);
-      if (match && match[1]) detectedBillNo = match[1].trim();
-    }
-    if (!detectedBillNo && /\b(?:NO|NUMBER)\b/i.test(line)) {
-      const match = line.match(/\b(?:NO|NUMBER)\b\s*[:.\-\s]*([A-Z0-9]{3,20}(?:\/[A-Z0-9]+)?)/i);
-      if (match && match[1]) detectedBillNo = match[1].trim();
-    }
-
-    if (!detectedDate && (upper.includes('DATE') || upper.includes('DATED'))) {
-      const match = line.match(/(\d{2}[-\/\.]\d{2}[-\/\.]\d{2,4})/);
-      if (match) detectedDate = match[1];
-    }
-  }
+  const meta = detectInvoiceMetadata(lines.map((text, index) => ({ y: index, text })));
+  let detectedSupplier = headerInfo.supplier || meta.supplier || '';
+  let detectedBillNo = headerInfo.billNo || meta.billNo || '';
+  let detectedDate = headerInfo.date || meta.date || '';
 
   const items: ErpRow[] = [];
   let tableStarted = false;
@@ -633,7 +651,16 @@ async function callGeminiWithRotation(payload: any): Promise<string> {
     }
   }
   
-  throw new Error(`All AI models exhausted. Falling back to Local OCR (Tesseract).`);
+  throw new Error(`All OCR models exhausted. Falling back to Local OCR (Tesseract).`);
+}
+
+function pickParsedInvoiceHeader(obj: any): InvoiceHeader {
+  const h = obj?.header_metadata || obj?.header || obj || {};
+  return {
+    supplier: String(h.supplier || h.supplier_name || h.seller || h.seller_name || h.billed_by || h.party_name || '').trim(),
+    billNo: String(h.billNo || h.bill_no || h.bill_number || h.invoice_number || h.invoice_no || h.inv_no || h.invoiceNo || '').trim(),
+    date: String(h.date || h.invoice_date || h.bill_date || h.invoiceDate || h.billDate || '').trim()
+  };
 }
 
 export async function performGeminiOcrOnCanvas(canvas: HTMLCanvasElement): Promise<any> {
@@ -672,7 +699,9 @@ export async function performGeminiOcrOnCanvas(canvas: HTMLCanvasElement): Promi
    - "COMPANY": Manufacturer or Pharmaceutical brand company name (e.g., "LARENO", "DR REDDY").
 
 4. STRICT JSON OUTPUT:
-   - Output ONLY a single JSON object matching the required schema.`;
+   - Output ONLY a single JSON object with this shape:
+     {"supplier":"","billNo":"","date":"","items":[]}
+   - supplier = seller/distributor name, billNo = invoice/bill number, date = invoice/bill date.`;
 
   const payload = {
     contents: [{
@@ -697,30 +726,14 @@ export async function performGeminiOcrOnCanvas(canvas: HTMLCanvasElement): Promi
   
   try {
     let parsed = JSON.parse(rawResponse);
-    
-    // Handle different response formats from Gemini
-    // Format 1: { header_metadata: {...}, line_items: [...] }
-    if (parsed.header_metadata) {
-      parsed = {
-        supplier: parsed.header_metadata.supplier_name || parsed.header_metadata.supplier || '',
-        billNo: parsed.header_metadata.invoice_number || parsed.header_metadata.billNo || '',
-        date: parsed.header_metadata.invoice_date || parsed.header_metadata.date || '',
-        items: parsed.line_items || parsed.items || []
-      };
-    }
-    // Format 2: { header: {...}, line_items: [...] }
-    else if (parsed.header && !parsed.supplier) {
-      parsed = {
-        supplier: parsed.header.supplier_name || parsed.header.supplier || '',
-        billNo: parsed.header.invoice_number || parsed.header.billNo || '',
-        date: parsed.header.invoice_date || parsed.header.date || '',
-        items: parsed.line_items || parsed.items || []
-      };
-    } 
-    // Format 3: Ensure items field exists
-    else if (!parsed.items && parsed.line_items) {
-      parsed.items = parsed.line_items;
-    }
+    const header = pickParsedInvoiceHeader(parsed);
+    const items = parsed.line_items || parsed.items || [];
+    parsed = {
+      supplier: header.supplier || parsed.supplier || '',
+      billNo: header.billNo || parsed.billNo || parsed.bill_no || '',
+      date: header.date || parsed.date || parsed.invoice_date || '',
+      items
+    };
     
     // Normalize field names in items
     if (parsed.items && Array.isArray(parsed.items)) {
@@ -762,12 +775,13 @@ export async function performGeminiOcrOnCanvas(canvas: HTMLCanvasElement): Promi
         let extracted = JSON.parse(jsonMatch[0]);
         console.log("✅ Extracted JSON from wrapped response");
         // Re-run normalization on extracted JSON
-        if (extracted.header_metadata) {
+        if (extracted.header_metadata || extracted.header) {
+          const header = pickParsedInvoiceHeader(extracted);
           extracted = {
-            supplier: extracted.header_metadata.supplier_name || '',
-            billNo: extracted.header_metadata.invoice_number || '',
-            date: extracted.header_metadata.invoice_date || '',
-            items: extracted.line_items || []
+            supplier: header.supplier,
+            billNo: header.billNo,
+            date: header.date,
+            items: extracted.line_items || extracted.items || []
           };
         }
         return extracted;

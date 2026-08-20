@@ -1,8 +1,8 @@
 // @ts-nocheck
 import * as pdfjsLib from 'pdfjs-dist';
-import { ErpRow, RawTextLine, InvoiceHeader, groupTextIntoLines, detectTableBounds, mapColumns, buildTableRows } from './ocr';
+import { ErpRow, RawTextLine, InvoiceHeader, groupTextIntoLines, detectTableBounds, mapColumns, buildTableRows, detectInvoiceMetadata } from './ocr';
 
-export async function extractDataFromPage(doc: any, pageNum: number, headerInfo: InvoiceHeader): Promise<{
+export async function extractDataFromPage(doc: any, pageNum: number, headerInfo: InvoiceHeader, topCutoff = 12, bottomCutoff = 88): Promise<{
   rows: ErpRow[];
   supplier: string;
   billNo: string;
@@ -48,7 +48,13 @@ export async function extractDataFromPage(doc: any, pageNum: number, headerInfo:
   let detectedBillNo = headerInfo.billNo;
   let detectedDate = headerInfo.date;
 
-  const metadata = detectInvoiceMetadata(rawTextLines);
+  const metadata = detectInvoiceMetadata(rawTextLines.filter(line => line.y < (topCutoff / 100) * pageHeight));
+  if (!metadata.supplier && !metadata.billNo && !metadata.date) {
+    const fallback = detectInvoiceMetadata(rawTextLines);
+    if (fallback.supplier) metadata.supplier = fallback.supplier;
+    if (fallback.billNo) metadata.billNo = fallback.billNo;
+    if (fallback.date) metadata.date = fallback.date;
+  }
   if (metadata.supplier && !detectedSupplier) detectedSupplier = metadata.supplier;
   if (metadata.billNo && !detectedBillNo) detectedBillNo = metadata.billNo;
   if (metadata.date && !detectedDate) detectedDate = metadata.date;
@@ -70,8 +76,8 @@ export async function extractDataFromPage(doc: any, pageNum: number, headerInfo:
     }));
   }
 
-  const topPixelLimit = 15 / 100 * pageHeight;
-  const bottomPixelLimit = 85 / 100 * pageHeight;
+  const topPixelLimit = topCutoff / 100 * pageHeight;
+  const bottomPixelLimit = bottomCutoff / 100 * pageHeight;
 
   const tableDataLines = sortedLines.filter((line, idx) => {
     if (idx === headerIndex) return false;
@@ -80,6 +86,11 @@ export async function extractDataFromPage(doc: any, pageNum: number, headerInfo:
   });
 
   const extractedRows = buildTableRows(tableDataLines, detectedColumns);
+  extractedRows.forEach(row => {
+    if (!row["SUPPLIER"]) row["SUPPLIER"] = detectedSupplier || "";
+    if (!row["BILL NO."]) row["BILL NO."] = detectedBillNo || "";
+    if (!row["DATE"]) row["DATE"] = detectedDate || "";
+  });
 
   return {
     rows: extractedRows,
@@ -90,7 +101,7 @@ export async function extractDataFromPage(doc: any, pageNum: number, headerInfo:
   };
 }
 
-export async function extractAllPagesData(doc: any, headerInfo: InvoiceHeader): Promise<{
+export async function extractAllPagesData(doc: any, headerInfo: InvoiceHeader, topCutoff = 12, bottomCutoff = 88): Promise<{
   rows: ErpRow[];
   supplier: string;
   billNo: string;
@@ -104,7 +115,7 @@ export async function extractAllPagesData(doc: any, headerInfo: InvoiceHeader): 
   let finalDate = headerInfo.date;
 
   for (let p = 1; p <= doc.numPages; p++) {
-    const pageResult = await extractDataFromPage(doc, p, headerInfo);
+    const pageResult = await extractDataFromPage(doc, p, headerInfo, topCutoff, bottomCutoff);
     if (pageResult) {
       combinedRows = [...combinedRows, ...pageResult.rows];
       if (pageResult.supplier && !finalSupplier) finalSupplier = pageResult.supplier;
@@ -115,6 +126,9 @@ export async function extractAllPagesData(doc: any, headerInfo: InvoiceHeader): 
 
   combinedRows.forEach((r, idx) => {
     r["PSRLNO"] = String(idx + 1);
+    if (!r["SUPPLIER"]) r["SUPPLIER"] = finalSupplier || "";
+    if (!r["BILL NO."]) r["BILL NO."] = finalBillNo || "";
+    if (!r["DATE"]) r["DATE"] = finalDate || "";
   });
 
   const validRows = combinedRows.filter(row => {
@@ -150,36 +164,21 @@ export function renderPdfPageToCanvas(
   pageNum: number,
   canvas: HTMLCanvasElement,
   tableTopCutoff: number,
-  tableBottomCutoff: number
+  tableBottomCutoff: number,
+  rotation = 0
 ): Promise<void> {
   return new Promise(async (resolve, reject) => {
     try {
       const page = await pdfDoc.getPage(pageNum);
       const ctx = canvas.getContext('2d')!;
-      const viewport = page.getViewport({ scale: 1.2 });
+      const viewport = page.getViewport({ scale: 1.2, rotation });
       canvas.width = viewport.width;
       canvas.height = viewport.height;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       await page.render({ canvasContext: ctx, viewport }).promise;
 
-      const topY = (tableTopCutoff / 100) * canvas.height;
-      const bottomY = (tableBottomCutoff / 100) * canvas.height;
-
-      ctx.strokeStyle = '#10B981';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 3]);
-      ctx.beginPath();
-      ctx.moveTo(0, topY);
-      ctx.lineTo(canvas.width, topY);
-      ctx.stroke();
-
-      ctx.strokeStyle = '#EF4444';
-      ctx.beginPath();
-      ctx.moveTo(0, bottomY);
-      ctx.lineTo(canvas.width, bottomY);
-      ctx.stroke();
-
-      ctx.setLineDash([]);
       resolve();
     } catch (err) {
       reject(err);
