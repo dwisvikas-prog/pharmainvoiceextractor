@@ -29,25 +29,25 @@ export default function UploadMenu({
   return (
     <div
       ref={menuRef}
-      className="absolute top-full mt-1 right-0 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50 min-w-[200px]"
+      className="absolute top-full mt-2 right-0 bg-white border border-slate-200 rounded-2xl shadow-card z-50 min-w-[220px] overflow-hidden py-1"
     >
       <button
         onClick={(e) => { e.stopPropagation(); onSelectPdf(); }}
-        className="w-full text-left px-4 py-2 text-sm text-slate-200 hover:bg-slate-700 flex items-center space-x-2"
+        className="w-full text-left px-4 py-2.5 text-sm text-slate-800 hover:bg-blue-50 flex items-center space-x-2"
       >
         <span>Upload Bill PDF / Image</span>
       </button>
       <button
         onClick={(e) => { e.stopPropagation(); onSelectExcel(); }}
         disabled={excelDisabled}
-        className={`w-full text-left px-4 py-2 text-sm flex items-center space-x-2 ${excelDisabled ? 'text-slate-500 cursor-not-allowed' : 'text-slate-200 hover:bg-slate-700'}`}
+        className={`w-full text-left px-4 py-2.5 text-sm flex items-center space-x-2 ${excelDisabled ? 'text-slate-400 cursor-not-allowed' : 'text-slate-800 hover:bg-blue-50'}`}
       >
         <span>Upload Excel / CSV</span>
       </button>
       <button
         onClick={(e) => { e.stopPropagation(); onSelectText(); }}
         disabled={textDisabled}
-        className={`w-full text-left px-4 py-2 text-sm flex items-center space-x-2 ${textDisabled ? 'text-slate-500 cursor-not-allowed' : 'text-slate-200 hover:bg-slate-700'}`}
+        className={`w-full text-left px-4 py-2.5 text-sm flex items-center space-x-2 ${textDisabled ? 'text-slate-400 cursor-not-allowed' : 'text-slate-800 hover:bg-blue-50'}`}
       >
         <span>Upload Text File</span>
       </button>
@@ -55,7 +55,7 @@ export default function UploadMenu({
       {onSelectPdfToCsv && (
         <button
           onClick={(e) => { e.stopPropagation(); onSelectPdfToCsv(); }}
-          className="w-full text-left px-4 py-2 text-sm text-slate-200 hover:bg-slate-700 flex items-center space-x-2"
+          className="w-full text-left px-4 py-2.5 text-sm text-slate-800 hover:bg-blue-50 flex items-center space-x-2"
         >
           <span>PDF to CSV Converter</span>
         </button>

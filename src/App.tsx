@@ -28,13 +28,15 @@ import {
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import * as XLSX from 'xlsx';
-import { ERP_COLUMNS, SHOW_RAW_PDF_TEXT_TAB, THEME_OPTIONS, ZERO_FILL_COLUMNS, type AppThemeId } from './utils/constants';
+import { ERP_COLUMNS, SHOW_RAW_PDF_TEXT_TAB, SHOW_LOCAL_OCR, SHOW_AUTO_FETCH_ON_UPLOAD, SHOW_AUTO_FILL_HEADER, SHOW_PAYMENT_CHECKOUT, ZERO_FILL_COLUMNS } from './utils/constants';
 import { ErpRow, InvoiceHeader, RawTextLine, normalizeToErpRows, performGeminiOcrOnCanvas, performTesseractOcrOnCanvas, parseTesseractTextToStructuredData, performGeminiVerbatimOcrOnCanvas } from './utils/ocr';
 import { extractAllPagesData, loadPdfDocument, renderPdfPageToCanvas } from './utils/pdfExtraction';
 import UploadMenu from './components/UploadMenu';
-import ThemeMenu from './components/ThemeMenu';
+import AccessPaywall from './components/AccessPaywall';
 import MetadataPanel from './components/MetadataPanel';
 import StudioTable from './components/StudioTable';
+import { getStoredSession, getDaysUntilExpiry, isExpiryWarningWindow, loginUser, logoutSession, registerUser, redeemPasscode, TRIAL_DAYS, PLAN_PRICING, getAccessBlockReason, getVerifyOcrLimit, recordVerifyOcrPages, isSessionStillActive, SessionInvalidatedError, type AuthSession, type PlanId, type BillingCycle } from './utils/auth';
+import dwisLogo from './assets/dwis-logo.png';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -64,6 +66,14 @@ function getRetryDelayMilliseconds(message: string): number {
   return match ? Math.ceil(Number(match[1]) * 1000) : 60_000;
 }
 
+// Neutralizes values that would be interpreted as a spreadsheet formula
+// (CSV/Excel formula injection) when the exported file is reopened, without
+// disturbing ordinary negative numbers (e.g. "-5") or dates.
+const FORMULA_TRIGGER_RE = /^[=+@]|^-(?!\d)/;
+function sanitizeForSpreadsheet(value: string): string {
+  return FORMULA_TRIGGER_RE.test(value) ? `'${value}` : value;
+}
+
 function assignUniqueRandomCodes(rows: ErpRow[]): ErpRow[] {
   const used = new Set<string>();
   for (const row of rows) {
@@ -86,6 +96,133 @@ function assignUniqueRandomCodes(rows: ErpRow[]): ErpRow[] {
   });
 }
 
+const landingStats = [
+  { value: 'PDF', label: 'Upload' },
+  { value: 'OCR', label: 'Pages' },
+  { value: '34', label: 'ERP cols' },
+  { value: 'XLSX', label: 'Export' }
+];
+
+const landingFeatures = [
+  {
+    title: 'Invoice upload',
+    description: 'Drop a bill PDF or image into TAP. Preview the page, then set cutoffs before you extract.',
+    accent: 'from-blue-500 to-blue-700'
+  },
+  {
+    title: 'OCR current & all pages',
+    description: SHOW_LOCAL_OCR
+      ? 'Run Local or Verify OCR on the page you are viewing, or process every page of a multi-page invoice.'
+      : 'Run Verify OCR on the page you are viewing, or process every page of a multi-page invoice.',
+    accent: 'from-blue-600 to-indigo-600'
+  },
+  {
+    title: '34-column ERP table',
+    description: 'Review supplier, bill number, date, and line items in an editable table that matches your ERP layout.',
+    accent: 'from-sky-500 to-blue-600'
+  },
+  {
+    title: 'Excel export',
+    description: 'Save metadata into rows, then export a clean workbook when the table has data ready for operations.',
+    accent: 'from-blue-500 to-sky-600'
+  }
+];
+
+const workflowSteps = [
+  'Upload invoice PDF or image',
+  'Review metadata and 34-col table',
+  'Save, then export Excel'
+];
+
+const tapTools = ['PDF / Image', 'Preview cutoffs', 'Metadata Save', 'OCR current page', 'OCR all pages', 'Excel export'];
+
+const TAP_PLAN_FEATURES = [
+  'Invoice PDF / image upload',
+  'Preview cutoffs',
+  'Metadata Save',
+  '34-column ERP table',
+  'Excel export',
+  'Verify OCR (current page)',
+  'Verify OCR (all pages)',
+  'Multi-page invoices'
+];
+
+type PricingTab = 'trial' | 'monthly' | 'annually';
+type PlanTier = 'basic' | 'premium';
+
+const TAP_TIER_INCLUDED: Record<PlanTier, number> = {
+  basic: 6,
+  premium: 8
+};
+
+const PRICING_CONTACT = { tel: '9988336023', href: 'tel:9988336023' };
+
+const tapFaqs = [
+  {
+    question: 'Does DWIS TAP work with PDFs and scanned invoices?',
+    answer: 'Yes. Upload a bill PDF or image, set preview cutoffs, then extract into the 34-column table. Use OCR on the current page or all pages when the PDF has more than one sheet.'
+  },
+  {
+    question: 'Where do I login or register?',
+    answer: 'Use the Account tab, or the Login / Register buttons. After you sign in, the invoice studio opens with upload, OCR, Save, and Excel export.'
+  },
+  {
+    question: 'Can I export Excel?',
+    answer: 'Yes. Save supplier, bill number, and date into the rows, then Export Excel when the table has product lines.'
+  },
+  {
+    question: 'What happens when trial or OCR pages end?',
+    answer: 'The invoice studio locks. Contact us to continue. After the next plan is active you can extract again. Extra 15 trial days use the Extend trial passcode.'
+  }
+];
+
+function TapPricingCard({
+  badge,
+  title,
+  subtitle,
+  price,
+  howToGet,
+  howToUse,
+  ocrNote,
+  includedCount
+}: {
+  badge: string;
+  title: string;
+  subtitle: string;
+  price: string;
+  howToGet: string;
+  howToUse: string;
+  ocrNote: string;
+  includedCount: number;
+}) {
+  return (
+    <div className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
+      <div className="inline-flex w-fit rounded bg-[#1e86bb] px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-white">{badge}</div>
+      <h5 className="mt-3 text-lg font-bold text-slate-900">{title}</h5>
+      <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
+      <p className="mt-3 text-2xl font-black tracking-tight text-slate-900">{price}</p>
+      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-blue-700">How you get it</p>
+      <p className="mt-1 text-sm text-slate-600">{howToGet}</p>
+      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-blue-700">How you use it</p>
+      <p className="mt-1 text-sm text-slate-600">{howToUse}</p>
+      <p className="mt-3 text-sm font-medium text-slate-800">{ocrNote}</p>
+      <ul className="mt-4 flex-1 space-y-1.5 text-sm">
+        {TAP_PLAN_FEATURES.map((feature, i) => (
+          <li key={feature} className={i < includedCount ? 'text-slate-800' : 'text-slate-400 line-through'}>
+            {feature}
+          </li>
+        ))}
+      </ul>
+      <a
+        href={PRICING_CONTACT.href}
+        className="mt-5 inline-flex items-center justify-center rounded-lg bg-[#1e86bb] px-4 py-2.5 text-sm font-semibold text-white no-underline hover:bg-[#1970a0]"
+      >
+        Contact us
+      </a>
+    </div>
+  );
+}
+
 export default function App() {
   const [tableData, setTableData] = useState<ErpRow[]>([]);
   const [docHeaderInfo, setDocHeaderInfo] = useState<InvoiceHeader>({
@@ -97,7 +234,8 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMsg, setStatusMsg] = useState('Ready for processing');
   const [isDragging, setIsDragging] = useState(false);
-  const [autoFillHeaderInfo, setAutoFillHeaderInfo] = useState(true);
+  const [autoFillHeaderInfo, setAutoFillHeaderInfo] = useState(SHOW_AUTO_FILL_HEADER);
+  const applyAutoFill = SHOW_AUTO_FILL_HEADER && autoFillHeaderInfo;
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -108,7 +246,6 @@ export default function App() {
   const [ocrUsageCount, setOcrUsageCount] = useState(0);
   const [selectedUploadType, setSelectedUploadType] = useState<'excel' | 'text' | null>(null);
   const [showMasterMenu, setShowMasterMenu] = useState(false);
-  const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [activeView, setActiveView] = useState<'extractor' | 'csv'>('extractor');
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvContent, setCsvContent] = useState<string>('');
@@ -121,15 +258,21 @@ export default function App() {
   const [tableBottomCutoff, setTableBottomCutoff] = useState(88);
   const [previewWidth, setPreviewWidth] = useState(380);
   const [previewZoom, setPreviewZoom] = useState(1);
-  const [bgOption, setBgOption] = useState<AppThemeId>(() => {
-    try {
-      const saved = localStorage.getItem('app_bg_option');
-      if (saved === '2') return 'yellow';
-      if (saved === '1' || !saved) return 'paper';
-      if (THEME_OPTIONS.some((t) => t.id === saved)) return saved as AppThemeId;
-    } catch (_) {}
-    return 'paper';
-  });
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authName, setAuthName] = useState('');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authSuccess, setAuthSuccess] = useState('');
+  const [sessionKickedOutMessage, setSessionKickedOutMessage] = useState('');
+  const [session, setSession] = useState<AuthSession | null>(null);
+  const [passcode, setPasscode] = useState('');
+  const [passcodeMessage, setPasscodeMessage] = useState('');
+  const [showPasscodeModal, setShowPasscodeModal] = useState(false);
+  const [planLevel, setPlanLevel] = useState<'basic' | 'pro'>('basic');
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
+  const [pricingTab, setPricingTab] = useState<PricingTab>('trial');
+  const [planExpiresAt, setPlanExpiresAt] = useState<string>(() => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString());
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewWrapRef = useRef<HTMLDivElement>(null);
@@ -184,11 +327,121 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const classes = ['bg-theme-1', 'bg-theme-2', ...THEME_OPTIONS.map((t) => `bg-theme-${t.id}`)];
-    document.body.classList.remove(...classes);
-    document.body.classList.add(`bg-theme-${bgOption}`);
-    try { localStorage.setItem('app_bg_option', bgOption); } catch (_) {}
-  }, [bgOption]);
+    document.body.classList.add('brand-app');
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    getStoredSession().then((storedSession) => {
+      if (active && storedSession) setSession(storedSession);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Single-active-session enforcement: if another device logs into this
+  // account, our claimed session token stops matching the database's
+  // current one. Poll for that regularly and on tab focus, and kick this
+  // device out immediately when it happens.
+  useEffect(() => {
+    if (!session) return;
+
+    let cancelled = false;
+    const checkStillActive = async () => {
+      const stillActive = await isSessionStillActive(session);
+      if (!cancelled && !stillActive) {
+        await logoutSession(session);
+        setSession(null);
+        setSessionKickedOutMessage(new SessionInvalidatedError().message);
+      }
+    };
+
+    const intervalId = window.setInterval(checkStillActive, 20000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') checkStillActive();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [session?.sessionToken]);
+
+  const openAuth = (mode: 'login' | 'register') => {
+    setAuthMode(mode);
+    setAuthError('');
+    window.requestAnimationFrame(() => {
+      document.getElementById('auth')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  };
+
+  const handleAuthSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setAuthError('');
+    setAuthSuccess('');
+
+    try {
+      const nextSession = authMode === 'register'
+        ? await registerUser({ name: authName, email: authEmail, password: authPassword })
+        : await loginUser({ email: authEmail, password: authPassword });
+      setSession(nextSession);
+      setAuthSuccess(authMode === 'register' ? 'Registration successful. Your account is ready.' : 'Login successful.');
+      if (typeof window !== 'undefined' && window.location.hash) {
+        window.history.replaceState(null, '', window.location.pathname || '/');
+      }
+      setAuthName('');
+      setAuthEmail('');
+      setAuthPassword('');
+    } catch (error: any) {
+      setAuthError(error?.message || 'Authentication failed.');
+    }
+  };
+
+  const handleLogout = async () => {
+    await logoutSession(session);
+    setSession(null);
+    setAuthSuccess('Logged out successfully.');
+  };
+
+  const handlePasscodeSubmit = async () => {
+    if (!session) return;
+    try {
+      const next = await redeemPasscode(session, passcode);
+      setSession(next);
+      setPasscode('');
+      setShowPasscodeModal(false);
+      setPasscodeMessage(`Trial extended by ${TRIAL_DAYS} days.`);
+    } catch (error: any) {
+      if (error instanceof SessionInvalidatedError) {
+        setShowPasscodeModal(false);
+        setSession(null);
+        setSessionKickedOutMessage(error.message);
+        return;
+      }
+      setPasscodeMessage(error?.message || 'Invalid passcode. Please try again.');
+    }
+  };
+
+  const handleActivatePlan = (_plan: Exclude<PlanId, 'trial'>, _cycle: BillingCycle) => {
+    if (!session) return;
+    setStatusMsg('Online checkout is not live yet. Contact us to activate a paid plan.');
+  };
+
+  const handlePlanSelection = (nextPlan: 'basic' | 'pro', nextCycle: 'monthly' | 'yearly') => {
+    setPlanLevel(nextPlan);
+    setBillingCycle(nextCycle);
+    const days = nextCycle === 'monthly' ? 30 : 365;
+    const nextExpiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    setPlanExpiresAt(nextExpiry);
+    try { localStorage.setItem('dwis_plan', JSON.stringify({ planLevel: nextPlan, billingCycle: nextCycle, planExpiresAt: nextExpiry })); } catch (_) {}
+  };
+
+  const planPrice = PLAN_PRICING[planLevel][billingCycle];
+  const planDaysLeft = getDaysUntilExpiry(planExpiresAt);
+  const showPlanExpiryWarning = isExpiryWarningWindow(planExpiresAt);
 
   const incrementOcrUsage = (count = 1) => {
     setOcrUsageCount(prev => {
@@ -285,7 +538,7 @@ export default function App() {
       await page.render({ canvasContext: ctx, viewport }).promise;
       const rawText = await performTesseractOcrOnCanvas(tempCanvas, setTesseractProgress);
       if (!rawText) continue;
-      const parsed = parseTesseractTextToStructuredData(rawText, finalHeader, autoFillHeaderInfo);
+      const parsed = parseTesseractTextToStructuredData(rawText, finalHeader, applyAutoFill);
       if (parsed.header.supplier && !finalHeader.supplier) finalHeader.supplier = parsed.header.supplier;
       if (parsed.header.billNo && !finalHeader.billNo) finalHeader.billNo = parsed.header.billNo;
       if (parsed.header.date && !finalHeader.date) finalHeader.date = parsed.header.date;
@@ -294,7 +547,7 @@ export default function App() {
     if (finalHeader.supplier || finalHeader.billNo || finalHeader.date) {
       setDocHeaderInfo(finalHeader);
     }
-    return normalizeToErpRows(combinedItems, finalHeader, autoFillHeaderInfo, startIndex);
+    return normalizeToErpRows(combinedItems, finalHeader, applyAutoFill, startIndex);
   };
 
   const processFile = async (file: File) => {
@@ -323,7 +576,7 @@ export default function App() {
         img.onload = () => {
           imageSourceRef.current = img;
           drawImagePreview(img, 0);
-          setStatusMsg("Image loaded. Use Local OCR or Verify OCR to extract data.");
+          setStatusMsg("Image loaded. Use Verify OCR to extract data.");
           setIsProcessing(false);
         };
         img.src = e.target?.result as string;
@@ -339,6 +592,11 @@ export default function App() {
       setCurrentPage(1);
 
       try {
+        if (!SHOW_AUTO_FETCH_ON_UPLOAD) {
+          setStatusMsg(`PDF loaded (${loadedPdf.numPages} page(s)). Use Verify OCR to extract data.`);
+          return;
+        }
+
         const cached = localStorage.getItem(ocrCacheKeyRef.current);
         if (cached) {
           const { rows, header } = JSON.parse(cached);
@@ -359,7 +617,7 @@ export default function App() {
       } catch (extractionError) {
         console.warn('[PDF] Fast extraction failed:', extractionError);
         setIsScannedPdf(true);
-        setStatusMsg('Fast PDF extraction failed. Use Local OCR first, then Verify OCR only if needed.');
+        setStatusMsg('Fast PDF extraction failed. Use Verify OCR if needed.');
         return;
       }
       setTableData(assignUniqueRandomCodes(result.rows));
@@ -379,11 +637,11 @@ export default function App() {
         setStatusMsg(
           extraRows.length
             ? `Extracted ${merged.length} rows from ${loadedPdf.numPages} pages.`
-            : `Page ${result.pagesNeedingOcr.join(', ')} had no extra table. Use Local OCR / Verify OCR if items are missing.`
+            : `Page ${result.pagesNeedingOcr.join(', ')} had no extra table. Use Verify OCR if items are missing.`
         );
       } else if (result.needsAiVerification) {
         setIsScannedPdf(true);
-        setStatusMsg('Fast extraction needs verification. Try Local OCR first; use Verify OCR only for unclear pages.');
+        setStatusMsg('Fast extraction needs verification. Use Verify OCR for unclear pages.');
       } else {
         setIsScannedPdf(false);
         saveOcrCache(result.rows, {
@@ -599,8 +857,23 @@ export default function App() {
       return;
     }
     if (aiRateLimited) {
-      setStatusMsg('OCR is temporarily rate-limited. Use Local OCR or wait before retrying Verify OCR.');
+      setStatusMsg('OCR is temporarily rate-limited. Wait before retrying Verify OCR.');
       return;
+    }
+    if (session && getAccessBlockReason(session) !== 'ok') {
+      setStatusMsg('Access locked. Contact us to continue.');
+      return;
+    }
+    if (session && targetPages === 'all' && session.plan !== 'pro') {
+      setStatusMsg('All-pages Verify OCR is on Premium. Contact us to upgrade.');
+      return;
+    }
+    if (session) {
+      const pagesNeeded = pdfDoc && targetPages === 'all' ? pdfDoc.numPages : 1;
+      if (session.ocrUsed + pagesNeeded > getVerifyOcrLimit(session.plan)) {
+        setStatusMsg('Verify OCR page limit reached. Contact us for the next plan.');
+        return;
+      }
     }
 
     setIsProcessing(true);
@@ -643,6 +916,7 @@ export default function App() {
         incrementOcrUsage(1);
         return ocrData;
       });
+      if (session) setSession(await recordVerifyOcrPages(session, pagesToProcess.length));
       for (const ocrData of ocrResults) {
         if (ocrData) {
           if (ocrData.supplier && !finalHeader.supplier) finalHeader.supplier = ocrData.supplier;
@@ -658,7 +932,7 @@ export default function App() {
       const normalizedRows = normalizeToErpRows(
         combinedItems,
         finalHeader,
-        autoFillHeaderInfo,
+        applyAutoFill,
         targetPages === 'all' ? 0 : tableData.length
       );
 
@@ -671,18 +945,24 @@ export default function App() {
       } else {
         console.warn("No items extracted. Extracted data:", combinedItems);
         console.warn("Final header:", finalHeader);
-        setStatusMsg(`Verify OCR returned data but no items detected. Try Local OCR or improve image clarity.`);
+        setStatusMsg(`Verify OCR returned data but no items detected. Improve image clarity or try again.`);
       }
     } catch (err) {
+      if (err instanceof SessionInvalidatedError) {
+        setSession(null);
+        setSessionKickedOutMessage(err.message);
+        setIsProcessing(false);
+        return;
+      }
       console.error("AI OCR Error:", err);
       const message = err instanceof Error ? err.message : String(err);
-      
+
       if (message.includes('429')) {
         const delay = getRetryDelayMilliseconds(message);
         setAiRetryUntil(Date.now() + delay);
         window.setTimeout(() => setAiRetryUntil(0), delay);
-        setStatusMsg(`OCR quota reached. Verify OCR is paused; use Local OCR now, then retry after ${Math.ceil(delay / 1000)} seconds.`);
-      } else if (message.includes('Falling back to Local OCR')) {
+        setStatusMsg(`OCR quota reached. Verify OCR is paused; retry after ${Math.ceil(delay / 1000)} seconds.`);
+      } else if (SHOW_LOCAL_OCR && message.includes('Falling back to Local OCR')) {
         // Auto-fallback to Local OCR (Tesseract)
         console.log("AI failed, auto-fallback to Local OCR...");
         setStatusMsg("Verify OCR unavailable. Attempting Local OCR...");
@@ -722,6 +1002,7 @@ export default function App() {
   };
 
   const handleRunTesseractOcr = async (targetPages: 'current' | 'all' = 'current') => {
+    if (!SHOW_LOCAL_OCR) return;
     const isImageDocument = Boolean(imageSourceRef.current && canvasRef.current);
     if (!pdfDoc && !isImageDocument) {
       setStatusMsg("Please upload a PDF or image invoice first.");
@@ -760,7 +1041,7 @@ export default function App() {
         const rawText = await performTesseractOcrOnCanvas(tempCanvas, setTesseractProgress);
 
         if (rawText) {
-          const parsed = parseTesseractTextToStructuredData(rawText, docHeaderInfo, autoFillHeaderInfo);
+          const parsed = parseTesseractTextToStructuredData(rawText, docHeaderInfo, applyAutoFill);
 
           if (parsed.header.supplier && !finalHeader.supplier) finalHeader.supplier = parsed.header.supplier;
           if (parsed.header.billNo && !finalHeader.billNo) finalHeader.billNo = parsed.header.billNo;
@@ -775,7 +1056,7 @@ export default function App() {
       const normalizedRows = normalizeToErpRows(
         combinedItems,
         finalHeader,
-        autoFillHeaderInfo,
+        applyAutoFill,
         targetPages === 'all' ? 0 : tableData.length
       );
 
@@ -838,10 +1119,12 @@ export default function App() {
       ERP_COLUMNS,
       ...exportData.map(row => ERP_COLUMNS.map(col => {
         const value = row[col] || '';
-        if ((col === 'CODE' || ZERO_FILL_COLUMNS.includes(col)) && /^-?\d+(\.\d+)?$/.test(value)) {
+        const isPlainNumeric = /^-?\d+(\.\d+)?$/.test(value);
+        const hasLeadingZero = /^-?0\d/.test(value);
+        if ((col === 'CODE' || ZERO_FILL_COLUMNS.includes(col)) && isPlainNumeric && !hasLeadingZero) {
           return Number(value);
         }
-        return value;
+        return sanitizeForSpreadsheet(value);
       }))
     ];
     const worksheet = XLSX.utils.aoa_to_sheet(sheetRows);
@@ -867,9 +1150,6 @@ const handleConvertPdfToCsv = async () => {
   setCsvStatus('Initializing...');
 
   try {
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-    if (!apiKey) throw new Error('Missing VITE_GEMINI_API_KEY in .env');
-
     setCsvStatus('Loading PDF...');
     const arrayBuffer = await csvFile.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -910,7 +1190,8 @@ const handleConvertPdfToCsv = async () => {
     for (const pageText of allRawText) {
       const lines = pageText.split('\n');
       for (const line of lines) {
-        const escaped = line.replace(new RegExp(Q, 'g'), Q + Q);
+        const safeLine = sanitizeForSpreadsheet(line);
+        const escaped = safeLine.replace(new RegExp(Q, 'g'), Q + Q);
         csvRows.push(Q + escaped + Q);
       }
       csvRows.push(Q + '--- PAGE BREAK ---' + Q);
@@ -942,7 +1223,7 @@ const handleConvertPdfToCsv = async () => {
   const handleAddRow = () => {
     const emptyRow: ErpRow = {};
     ERP_COLUMNS.forEach(c => emptyRow[c] = "");
-    if (autoFillHeaderInfo) {
+    if (applyAutoFill) {
       emptyRow["SUPPLIER"] = docHeaderInfo.supplier;
       emptyRow["BILL NO."] = docHeaderInfo.billNo;
       emptyRow["DATE"] = docHeaderInfo.date;
@@ -969,53 +1250,433 @@ const handleConvertPdfToCsv = async () => {
     setTableData(updated);
   };
 
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-[#f8fafc] text-slate-900">
+        {sessionKickedOutMessage && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4">
+            <div className="w-full max-w-md rounded-2xl border border-amber-200 bg-white p-6 shadow-xl">
+              <div className="mb-3 flex items-center gap-2 text-amber-700">
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-lg font-bold">!</span>
+                <h3 className="text-lg font-bold text-slate-900">Signed out</h3>
+              </div>
+              <p className="text-sm leading-6 text-slate-700">{sessionKickedOutMessage}</p>
+              <button
+                type="button"
+                onClick={() => setSessionKickedOutMessage('')}
+                className="mt-5 w-full rounded-full bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-cta transition hover:bg-blue-700"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        )}
+        <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-md">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
+            <div className="flex items-center gap-3">
+              <img src={dwisLogo} alt="DWIS TAP" className="h-12 w-auto object-contain sm:h-14" />
+            </div>
+
+            <nav className="flex flex-1 flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm font-medium text-slate-600">
+              <a href="#how" className="transition hover:text-slate-900">How DWIS TAP works</a>
+              <a href="#features" className="transition hover:text-slate-900">Features</a>
+              <a href="#tools" className="transition hover:text-slate-900">Tools</a>
+              <a href="#plans" className="transition hover:text-slate-900">Plans</a>
+              <a href="#faq" className="transition hover:text-slate-900">FAQ</a>
+              <a href="#support" className="transition hover:text-slate-900">Support</a>
+              <a href="#auth" className="transition hover:text-slate-900">Account</a>
+            </nav>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => openAuth('login')}
+                className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              >
+                Login
+              </button>
+              <a
+                href={PRICING_CONTACT.href}
+                className="hidden rounded-full border border-[#1e86bb] px-4 py-2 text-sm font-semibold text-[#1e86bb] no-underline sm:inline-flex"
+              >
+                {PRICING_CONTACT.tel}
+              </a>
+              <button
+                type="button"
+                onClick={() => openAuth('register')}
+                className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-cta transition hover:bg-blue-700"
+              >
+                Register
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <main>
+          <section className="bg-white">
+            <div className="mx-auto grid max-w-7xl items-center gap-10 px-6 py-16 lg:grid-cols-[1.15fr_0.85fr] lg:py-20">
+              <div>
+                <div className="mb-4 inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700">
+                  Invoice extractor
+                </div>
+                <h1 className="max-w-xl text-4xl font-black tracking-tight text-slate-900 sm:text-5xl">
+                  Upload invoices. Extract. Export Excel.
+                </h1>
+                <p className="mt-5 max-w-xl text-lg text-slate-600">
+                  DWIS TAP turns bill PDFs and images into an editable 34-column ERP table — with preview cutoffs, metadata Save, OCR on the current page or all pages, then Excel export.
+                </p>
+                <div className="mt-7 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => openAuth('register')}
+                    className="rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-cta transition hover:bg-blue-700"
+                  >
+                    Register
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openAuth('login')}
+                    className="rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-800 transition hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    Login
+                  </button>
+                </div>
+                <div className="mt-8 flex flex-wrap gap-4 text-sm text-slate-600">
+                  {landingStats.map((item) => (
+                    <div key={item.label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <div className="text-xl font-bold text-slate-900">{item.value}</div>
+                      <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500">{item.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div id="auth" className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card scroll-mt-24">
+                <div className="mb-4 flex items-center gap-2">
+                  <button type="button" onClick={() => setAuthMode('login')} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${authMode === 'login' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-white text-slate-700'}`}>Login</button>
+                  <button type="button" onClick={() => setAuthMode('register')} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${authMode === 'register' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-white text-slate-700'}`}>Register</button>
+                </div>
+                <h2 className="text-xl font-black tracking-tight text-slate-900">
+                  {authMode === 'login' ? 'Login to TAP' : 'Create a TAP account'}
+                </h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  After login you get upload, preview cutoffs, metadata Save, OCR, the 34-column table, and Excel export.
+                </p>
+                <p className="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                  One active session per account: signing in on another device or browser will sign you out here.
+                  Do not share your login across multiple devices — repeated multi-device logins may lead to account suspension.
+                </p>
+                <form onSubmit={handleAuthSubmit} className="mt-4 space-y-3">
+                  {authMode === 'register' && (
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-600">Full Name</label>
+                      <input
+                        value={authName}
+                        onChange={(e) => setAuthName(e.target.value)}
+                        className="w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+                        placeholder="Your full name"
+                        required={authMode === 'register'}
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-600">Email</label>
+                    <input
+                      type="email"
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      className="w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+                      placeholder="you@example.com"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-slate-600">Password</label>
+                    <input
+                      type="password"
+                      value={authPassword}
+                      onChange={(e) => setAuthPassword(e.target.value)}
+                      className="w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+                      placeholder="••••••••"
+                      required
+                    />
+                  </div>
+                  {authError && <p className="text-xs text-red-600">{authError}</p>}
+                  {authSuccess && <p className="text-xs text-emerald-600">{authSuccess}</p>}
+                  <button type="submit" className="w-full rounded-full bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-cta transition hover:bg-blue-700">
+                    {authMode === 'login' ? 'Login to DWIS TAP' : 'Create account'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          </section>
+
+          <section id="how" className="scroll-mt-24 bg-slate-50 py-14 text-slate-900">
+            <div className="mx-auto max-w-7xl px-6">
+              <div className="mx-auto max-w-2xl text-center">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">How DWIS TAP works</p>
+                <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-900">Upload, extract, export Excel.</h2>
+              </div>
+              <div className="mt-10 grid gap-5 md:grid-cols-3">
+                {workflowSteps.map((step, index) => (
+                  <div key={step} className="rounded-2xl border border-slate-200 bg-white p-5">
+                    <div className="mb-4 flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
+                      {index + 1}
+                    </div>
+                    <p className="text-lg font-bold text-slate-900">{step}</p>
+                    <p className="mt-2 text-sm text-slate-600">
+                      {index === 0 && 'Upload a bill PDF or image, then set preview cutoffs if the page has extra header or footer text.'}
+                      {index === 1 && 'Check supplier, bill number, date, and the 34-column table. Use OCR on this page or every page when needed.'}
+                      {index === 2 && 'Save metadata into rows, then export Excel when the table has product lines.'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section id="features" className="scroll-mt-24 bg-white py-14 text-slate-900">
+            <div className="mx-auto max-w-7xl px-6">
+              <div className="mx-auto max-w-2xl text-center">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">Features</p>
+                <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-900">DWIS TAP invoice tools.</h2>
+              </div>
+              <div className="mt-10 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+                {landingFeatures.map((feature) => (
+                  <div key={feature.title} className="rounded-2xl border border-slate-200 bg-slate-50 p-5 shadow-sm">
+                    <div className={`mb-4 h-11 w-11 rounded-xl bg-gradient-to-br ${feature.accent} shadow-md`} />
+                    <h3 className="text-lg font-bold text-slate-900">{feature.title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{feature.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section id="tools" className="scroll-mt-24 bg-slate-50 py-14 text-slate-900">
+            <div className="mx-auto max-w-7xl px-6">
+              <div className="mx-auto max-w-2xl text-center">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">Tools</p>
+                <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-900">What you use after login.</h2>
+              </div>
+              <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {tapTools.map((item) => (
+                  <div key={item} className="rounded-xl border border-slate-200 bg-white px-4 py-4 text-center text-sm font-semibold text-slate-800">
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section id="plans" className="scroll-mt-24 bg-white py-14 text-slate-900">
+            <div className="mx-auto max-w-6xl px-6">
+              <div className="mx-auto max-w-2xl text-center">
+                <h2 className="text-3xl font-black tracking-tight text-slate-900">Plans</h2>
+                <p className="mt-3 text-lg text-slate-600">Register for a 15-day trial. Paid plans via Contact us. When days or OCR pages end, the studio locks until the next plan is active.</p>
+              </div>
+              <div className="mt-8 flex justify-center">
+                <div className="flex rounded-full border border-slate-200 bg-slate-100 p-1">
+                  {(['trial', 'monthly', 'annually'] as PricingTab[]).map((tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setPricingTab(tab)}
+                      className={`rounded-full px-4 py-1.5 text-sm font-semibold capitalize ${pricingTab === tab ? 'bg-[#1e86bb] text-white' : 'text-slate-700'}`}
+                    >
+                      {tab === 'annually' ? 'Annually' : tab === 'trial' ? 'Trial' : 'Monthly'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+                {pricingTab === 'trial' && (
+                  <TapPricingCard
+                    badge="Trial"
+                    title="Trial"
+                    subtitle={`Free for ${TRIAL_DAYS} days`}
+                    price={`₹0 · ${TRIAL_DAYS} days`}
+                    howToGet={`Register on Account. After ${TRIAL_DAYS} days, Contact us. A passcode adds ${TRIAL_DAYS} more days.`}
+                    howToUse="Login → Upload bill → set cutoffs → Verify OCR (current page) → Save → Export Excel."
+                    ocrNote="About 40 Verify OCR pages in the trial window."
+                    includedCount={TAP_TIER_INCLUDED.basic}
+                  />
+                )}
+                {pricingTab === 'monthly' && (
+                  <>
+                    <TapPricingCard
+                      badge="Basic"
+                      title="Monthly Basic"
+                      subtitle="1 admin · incl. GST"
+                      price={`₹${PLAN_PRICING.basic.monthly.toLocaleString('en-IN')} / month`}
+                      howToGet="Contact us after trial. We activate Basic for 30 days."
+                      howToUse="Same studio. Verify OCR on the page you are viewing."
+                      ocrNote="About 100 Verify OCR pages / month. Limit end → studio locks until next plan."
+                      includedCount={TAP_TIER_INCLUDED.basic}
+                    />
+                    <TapPricingCard
+                      badge="Premium"
+                      title="Monthly Premium"
+                      subtitle="1 admin"
+                      price={`₹${PLAN_PRICING.pro.monthly.toLocaleString('en-IN')} / month`}
+                      howToGet="Contact us. We activate Premium for 30 days."
+                      howToUse="Same studio plus Verify OCR on all pages of a multi-page PDF."
+                      ocrNote="About 180 Verify OCR pages / month. Limit end → studio locks until next plan."
+                      includedCount={TAP_TIER_INCLUDED.premium}
+                    />
+                  </>
+                )}
+                {pricingTab === 'annually' && (
+                  <>
+                    <TapPricingCard
+                      badge="Basic"
+                      title="Annual Basic"
+                      subtitle="1 admin · 12 months"
+                      price={`₹${PLAN_PRICING.basic.yearly.toLocaleString('en-IN')} / year`}
+                      howToGet="Contact us. We activate Basic for 12 months."
+                      howToUse="Same as Monthly Basic, billed yearly."
+                      ocrNote="About 100 Verify OCR pages / month for 12 months."
+                      includedCount={TAP_TIER_INCLUDED.basic}
+                    />
+                    <TapPricingCard
+                      badge="Premium"
+                      title="Annual Premium"
+                      subtitle="1 admin · 12 months"
+                      price={`₹${PLAN_PRICING.pro.yearly.toLocaleString('en-IN')} / year`}
+                      howToGet="Contact us. We activate Premium for 12 months."
+                      howToUse="Same as Monthly Premium, billed yearly."
+                      ocrNote="About 180 Verify OCR pages / month for 12 months."
+                      includedCount={TAP_TIER_INCLUDED.premium}
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+          </section>
+
+          <section id="faq" className="scroll-mt-24 bg-slate-50 py-14 text-slate-900">
+            <div className="mx-auto max-w-4xl px-6">
+              <div className="mx-auto max-w-2xl text-center">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">FAQ</p>
+                <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-900">DWIS TAP questions.</h2>
+              </div>
+              <div className="mt-10 space-y-4">
+                {tapFaqs.map((item) => (
+                  <div key={item.question} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="text-lg font-bold text-slate-900">{item.question}</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{item.answer}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section id="support" className="scroll-mt-24 bg-white py-14 text-slate-900">
+            <div className="mx-auto max-w-3xl px-6">
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-6 shadow-card">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">Support</p>
+                <h2 className="mt-2 text-2xl font-bold text-slate-900">Need help with DWIS TAP?</h2>
+                <p className="mt-3 text-sm leading-6 text-slate-600">
+                  Ask about invoice upload, preview cutoffs, OCR pages, metadata Save, or Excel export.
+                </p>
+                <a href="mailto:support@dwistap.com" className="mt-5 inline-flex rounded-full bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-cta hover:bg-blue-700">
+                  support@dwistap.com
+                </a>
+              </div>
+            </div>
+          </section>
+        </main>
+        <footer className="border-t border-slate-200 bg-white py-10 text-slate-600">
+          <div className="mx-auto flex max-w-7xl flex-col gap-6 px-6 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-black tracking-tight text-slate-900">DWIS TAP</p>
+              <p className="mt-1 text-xs text-slate-500">Invoice extractor for PDF, OCR, 34-column ERP, and Excel.</p>
+            </div>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <a href="#how" className="hover:text-blue-700">How DWIS TAP works</a>
+              <a href="#features" className="hover:text-blue-700">Features</a>
+              <a href="#tools" className="hover:text-blue-700">Tools</a>
+              <a href="#plans" className="hover:text-blue-700">Plans</a>
+              <a href="#faq" className="hover:text-blue-700">FAQ</a>
+              <a href="#support" className="hover:text-blue-700">Support</a>
+              <a href="#auth" className="hover:text-blue-700">Account</a>
+            </div>
+          </div>
+        </footer>
+      </div>
+    );
+  }
+
+  const accessBlock = getAccessBlockReason(session);
+  if (accessBlock !== 'ok') {
+    return (
+      <div className="app-shell min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col font-sans">
+        <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-md px-4 py-3 sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <img src={dwisLogo} alt="DWIS TAP" className="h-10 w-auto object-contain sm:h-12" />
+            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700">
+              <span>{session.user.name}</span>
+              {session.plan === 'trial' && (
+                <button
+                  type="button"
+                  onClick={() => setShowPasscodeModal(true)}
+                  className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-100"
+                >
+                  Extend trial
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="rounded-full bg-blue-600 px-3 py-1 text-white hover:bg-blue-700"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </header>
+        <AccessPaywall
+          session={session}
+          reason={accessBlock}
+          onLogout={handleLogout}
+          onActivatePlan={handleActivatePlan}
+        />
+        {showPasscodeModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 p-4">
+            <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
+              <h3 className="text-lg font-bold text-slate-900">Extend trial</h3>
+              <p className="mt-1 text-sm text-slate-600">Enter a trial passcode. Paid access is via Contact us until checkout is enabled.</p>
+              <input
+                type="text"
+                value={passcode}
+                onChange={(e) => setPasscode(e.target.value)}
+                className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                placeholder="Passcode"
+              />
+              {passcodeMessage && <p className="mt-2 text-sm text-red-600">{passcodeMessage}</p>}
+              <div className="mt-4 flex gap-2">
+                <button type="button" onClick={handlePasscodeSubmit} className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Apply</button>
+                <button type="button" onClick={() => setShowPasscodeModal(false)} className="rounded-full border border-slate-200 px-4 py-2 text-sm">Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="app-shell min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
-      {THEME_OPTIONS.find((t) => t.id === bgOption)?.hasShapes && (
-        <div className="bg-shapes-layer" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-          <span />
-        </div>
-      )}
-      <header className="bg-slate-800 border-b border-slate-700 px-6 py-3 flex items-center justify-between sticky top-0 z-50">
+    <div className="app-shell min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col font-sans">
+      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-md px-4 py-3 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <div className="bg-cyan-800 p-2 rounded-lg text-white font-bold">
-            <Pill className="w-6 h-6" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold text-cyan-900">
-              Pharma Invoice Extractor Pro
-            </h1>
-            <p className="text-xs text-slate-400">34-column pharma invoice extractor</p>
-          </div>
+          <img src={dwisLogo} alt="DWIS TAP" className="h-10 w-auto object-contain sm:h-12" />
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <div className="relative flex items-center gap-1.5">
-            <span className="text-xs font-semibold text-slate-700">Theme</span>
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); setShowThemeMenu(!showThemeMenu); setShowMasterMenu(false); }}
-              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-slate-400 bg-white/80"
-              title="Choose theme"
-            >
-              <span
-                className="bg-swatch"
-                style={{ background: THEME_OPTIONS.find((t) => t.id === bgOption)?.swatch }}
-              />
-              <svg className="w-3 h-3 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-            </button>
-            <ThemeMenu
-              show={showThemeMenu}
-              value={bgOption}
-              onSelect={(id) => { setBgOption(id); setShowThemeMenu(false); }}
-            />
-          </div>
           <button
             onClick={() => window.location.reload()}
-            className="header-btn-refresh flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition"
+            className="header-btn-refresh flex items-center space-x-2 px-4 py-2 rounded-full text-xs font-semibold transition"
             title="Refresh page"
           >
             <RefreshCw className="w-4 h-4" />
@@ -1024,8 +1685,8 @@ const handleConvertPdfToCsv = async () => {
 
           <div className="relative">
             <button
-              onClick={(e) => { e.stopPropagation(); setShowMasterMenu(!showMasterMenu); setShowThemeMenu(false); }}
-              className="header-btn-upload flex items-center space-x-2 px-3 py-1.5 rounded-md text-xs font-semibold transition"
+              onClick={(e) => { e.stopPropagation(); setShowMasterMenu(!showMasterMenu); }}
+              className="header-btn-upload flex items-center space-x-2 px-4 py-2 rounded-full text-xs font-semibold transition"
             >
               <Sparkles className="w-4 h-4" />
               <span>Upload</span>
@@ -1042,6 +1703,28 @@ const handleConvertPdfToCsv = async () => {
               />
             )}
           </div>
+
+          {session ? (
+            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700">
+              <span>{session.user.name}</span>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="rounded-full bg-blue-600 px-3 py-1 text-white hover:bg-blue-700"
+              >
+                Logout
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setAuthMode((prev) => prev === 'login' ? 'register' : 'login')}
+              className="header-btn-upload flex items-center space-x-2 px-4 py-2 rounded-full text-xs font-semibold transition"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>{authMode === 'login' ? 'Register' : 'Login'}</span>
+            </button>
+          )}
 
 
           <input
@@ -1090,28 +1773,40 @@ const handleConvertPdfToCsv = async () => {
           </button>
           */}
         </div>
+        </div>
       </header>
 
-      <div className="bg-slate-800/60 border-b border-slate-700/50 px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
-        <div className="flex items-center space-x-3">
-          <span className="flex items-center space-x-1.5 text-slate-300 bg-slate-900/60 px-3 py-1 rounded-md border border-slate-700">
-            <RefreshCw className={`w-3.5 h-3.5 ${isProcessing ? 'animate-spin text-cyan-800' : 'text-slate-400'}`} />
+      <div className="border-b border-slate-200 bg-white px-4 py-2 sm:px-6 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="flex items-center space-x-1.5 text-slate-700 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200">
+            <RefreshCw className={`w-3.5 h-3.5 ${isProcessing ? 'animate-spin text-blue-600' : 'text-slate-400'}`} />
             <span>{statusMsg}</span>
           </span>
-          <span className="bg-slate-200 text-slate-800 border border-slate-400 px-2.5 py-1 rounded-md font-medium">
+          <span className="bg-blue-50 text-blue-800 border border-blue-100 px-2.5 py-1.5 rounded-full font-medium">
             {tableData.length} Product Rows
           </span>
-          <span className="bg-white/55 text-slate-800 border border-slate-300 px-2.5 py-1 rounded-md font-medium">
-            OCR Today: {ocrUsageCount} / ~1,500 pages
+          <span className="bg-white text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-full font-medium">
+            Verify OCR: {session.ocrUsed} / {getVerifyOcrLimit(session.plan)} pages
+          </span>
+          <span className="bg-white text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-full font-medium">
+            Plan: {session.plan} · {getDaysUntilExpiry(session.expiresAt)} day(s) left
           </span>
         </div>
-
+        {session.plan === 'trial' && (
+          <button
+            type="button"
+            onClick={() => setShowPasscodeModal(true)}
+            className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
+          >
+            Extend trial
+          </button>
+        )}
         {SHOW_RAW_PDF_TEXT_TAB && (
-        <div className="flex items-center bg-slate-900/80 p-1 rounded-lg border border-slate-700 w-full sm:w-auto">
+        <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200 w-full sm:w-auto">
           <button
             onClick={() => setActiveTab('studio')}
             className={`flex items-center space-x-1.5 px-2 sm:px-3 py-1 rounded-md text-xs font-semibold transition ${
-              activeTab === 'studio' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+              activeTab === 'studio' ? 'bg-blue-600 text-white shadow' : 'text-slate-500 hover:text-slate-800'
             }`}
           >
             <TableIcon className="w-3.5 h-3.5" />
@@ -1120,7 +1815,7 @@ const handleConvertPdfToCsv = async () => {
           <button
             onClick={() => setActiveTab('raw')}
             className={`flex items-center space-x-1.5 px-3 py-1 rounded-md text-xs font-semibold transition ${
-              activeTab === 'raw' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+              activeTab === 'raw' ? 'bg-blue-600 text-white shadow' : 'text-slate-500 hover:text-slate-800'
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
@@ -1129,6 +1824,40 @@ const handleConvertPdfToCsv = async () => {
         </div>
         )}
       </div>
+
+      {showPlanExpiryWarning && (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-medium text-amber-900">
+              Your plan expires in {planDaysLeft} day(s).
+            </p>
+            <button type="button" onClick={() => setShowPasscodeModal(true)} className="rounded-full bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-500">Use Passcode</button>
+          </div>
+        </div>
+      )}
+
+      {showPasscodeModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/55 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900">Trial Extension</h3>
+              <button type="button" onClick={() => setShowPasscodeModal(false)} className="text-slate-500 hover:text-slate-700">✕</button>
+            </div>
+            <p className="text-sm text-slate-600">Enter a valid passcode to extend the free trial by 15 days.</p>
+            <input
+              value={passcode}
+              onChange={(e) => setPasscode(e.target.value)}
+              placeholder="Enter passcode"
+              className="mt-3 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500"
+            />
+            {passcodeMessage && <p className="mt-2 text-xs text-blue-700">{passcodeMessage}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setShowPasscodeModal(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">Cancel</button>
+              <button type="button" onClick={handlePasscodeSubmit} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">Apply code</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 flex overflow-hidden">
         {activeView === 'csv' ? (
@@ -1246,25 +1975,27 @@ const handleConvertPdfToCsv = async () => {
                 onExport={handleExportExcel}
                 canExport={tableData.length > 0}
               />
-              {(isScannedPdf || totalPages > 1) && (
+              {(pdfDoc || isScannedPdf) && (
                 <div className="ocr-banner border rounded-xl px-3 py-2 flex flex-wrap items-center gap-2 text-xs">
-                  <Scan className="w-4 h-4 text-cyan-800 flex-shrink-0" />
+                  <Scan className="w-4 h-4 text-blue-600 flex-shrink-0" />
                   <span className="font-semibold">
                     {totalPages > 1 ? `PDF has ${totalPages} pages — OCR any missing page:` : 'Scanned invoice — choose OCR:'}
                   </span>
+                  {SHOW_LOCAL_OCR && (
                   <button
                     onClick={() => handleRunTesseractOcr('current')}
                     disabled={isProcessing}
-                    className="ocr-btn ocr-btn-local py-1 px-2.5 rounded text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
+                    className="ocr-btn ocr-btn-local py-1.5 px-3 rounded-full text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
                   >
                     <Scan className="w-3.5 h-3.5" />
                     <span>Local OCR (Current Page)</span>
                   </button>
-                  {totalPages > 1 && (
+                  )}
+                  {SHOW_LOCAL_OCR && totalPages > 1 && (
                     <button
                       onClick={() => handleRunTesseractOcr('all')}
                       disabled={isProcessing}
-                      className="ocr-btn ocr-btn-local py-1 px-2.5 rounded text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
+                      className="ocr-btn ocr-btn-local py-1.5 px-3 rounded-full text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
                     >
                       <Scan className="w-3.5 h-3.5" />
                       <span>Local OCR (All Pages)</span>
@@ -1273,22 +2004,24 @@ const handleConvertPdfToCsv = async () => {
                   <button
                     onClick={() => handleRunAiOcr('current')}
                     disabled={isProcessing || aiRateLimited}
-                    className="ocr-btn ocr-btn-verify py-1 px-2.5 rounded text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
+                    className="ocr-btn ocr-btn-verify py-1.5 px-3 rounded-full text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>Verify OCR (Current Page)</span>
                   </button>
+                  {session.plan === 'pro' && (
                   <button
                     onClick={() => handleRunAiOcr('all')}
                     disabled={isProcessing || aiRateLimited}
-                    className="ocr-btn ocr-btn-all py-1 px-2.5 rounded text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
+                    className="ocr-btn ocr-btn-all py-1.5 px-3 rounded-full text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
                   >
                     <Zap className="w-3.5 h-3.5" />
                     <span>Verify OCR (All Pages)</span>
                   </button>
-                  {tesseractProgress.status && (
+                  )}
+                  {SHOW_LOCAL_OCR && tesseractProgress.status && (
                     <span className="flex items-center space-x-1.5 text-[11px]">
-                      <RefreshCw className={`w-3 h-3 ${isProcessing ? 'animate-spin text-cyan-800' : ''}`} />
+                      <RefreshCw className={`w-3 h-3 ${isProcessing ? 'animate-spin text-white' : ''}`} />
                       <span>{tesseractProgress.status}</span>
                     </span>
                   )}
@@ -1473,6 +2206,7 @@ const handleConvertPdfToCsv = async () => {
                   </button>
                 </div>
 
+                {SHOW_AUTO_FILL_HEADER && (
                 <div className="flex items-center gap-2 sm:gap-3 text-xs text-slate-400">
                   <label className="flex items-center space-x-1.5 cursor-pointer">
                     <input
@@ -1484,6 +2218,7 @@ const handleConvertPdfToCsv = async () => {
                     <span>Auto-Fill Header Meta into Rows</span>
                   </label>
                 </div>
+                )}
               </div>
 
               <StudioTable
@@ -1537,6 +2272,9 @@ const handleConvertPdfToCsv = async () => {
         )}
       </div>
 
+      <footer className="border-t border-slate-200 bg-white py-6 text-center text-xs text-slate-500">
+        DWIS TAP · Invoice extractor · Upload, OCR, 34-column ERP, Excel export
+      </footer>
     </div>
   );
 }

@@ -1,9 +1,6 @@
 // @ts-nocheck
-import { ERP_COLUMNS, HEADER_SYNONYMS, HEADER_KEYWORDS } from './constants';
+import { ERP_COLUMNS, HEADER_SYNONYMS, HEADER_KEYWORDS, SHOW_LOCAL_OCR } from './constants';
 import Tesseract from 'tesseract.js';
-
-const GEMINI_OCR_MODEL = import.meta.env.VITE_GEMINI_MODEL || 'gemini-3.5-flash'; // Better extraction
-const GEMINI_OCR_MODEL_FALLBACK = 'gemini-3.5-flash-lite'; // Fallback if needed
 
 export interface ErpRow {
   [col: string]: string;
@@ -581,77 +578,36 @@ export function parseTesseractTextToStructuredData(
 
 // ==================== OCR FUNCTIONS ====================
 
-function getGeminiApiKeys(): string[] {
-  const keys: string[] = [];
-  const primary = import.meta.env.VITE_GEMINI_API_KEY;
-  if (primary) keys.push(primary);
-  for (let i = 2; i <= 10; i++) {
-    const key = import.meta.env[`VITE_GEMINI_API_KEY_${i}`];
-    if (key) keys.push(key);
-  }
-  return keys;
-}
-
+// Calls our own /api/gemini-ocr serverless function, which holds the real
+// Gemini API key(s) server-side. The key must never be read or sent from the
+// browser (see api/gemini-ocr.js).
 async function callGeminiWithRotation(payload: any): Promise<string> {
-  const apiKeys = getGeminiApiKeys();
-  if (apiKeys.length === 0) throw new Error("No Gemini API keys found");
-  
-  const modelsToTry = [GEMINI_OCR_MODEL, GEMINI_OCR_MODEL_FALLBACK];
-  
-  for (const model of modelsToTry) {
-    console.log(`🚀 Trying: ${model}`);
-    const apiUrlBase = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+  const response = await fetch('/api/gemini-ocr', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ payload }),
+  });
 
-    for (let keyIndex = 0; keyIndex < apiKeys.length; keyIndex++) {
-      const apiKey = apiKeys[keyIndex];
-      const apiUrl = `${apiUrlBase}?key=${apiKey}`;
-      
-      try {
-        console.log(`📤 Uploading to API (Key ${keyIndex + 1})...`);
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        
-        if (!response.ok) {
-          const errText = await response.text();
-          console.error(`❌ ${response.status}: ${errText}`);
-          const error = new Error(`Gemini Vision API Error (${response.status}): ${errText}`) as Error & { status?: number };
-          error.status = response.status;
-          throw error;
-        }
-        
-        const result = await response.json();
-        const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!text) {
-          console.error("❌ No text in response:", JSON.stringify(result));
-          throw new Error("No text returned from Gemini");
-        }
-        
-        console.log(`✅ Success with ${model}, Response length: ${text.length}`);
-        console.log("Response preview:", text.substring(0, 200));
-        return text;
-      } catch (err: any) {
-        const status = err.status || 0;
-        console.error(`Key ${keyIndex + 1} (${model}) failed:`, err.message);
-        
-        // 429/503 = Rate limit, skip to next key immediately
-        if ((status === 503 || status === 429) && keyIndex < apiKeys.length - 1) {
-          console.log(`⏭️  Rotating to next API key...`);
-          continue;
-        }
-        
-        // 404 = Model not available, try next model
-        if (status === 404) {
-          console.log(`⏭️  Model ${model} not available, trying fallback...`);
-          break;
-        }
-      }
-    }
+  if (!response.ok) {
+    const errText = await response.text();
+    console.error(`❌ ${response.status}: ${errText}`);
+    const error = new Error(
+      SHOW_LOCAL_OCR
+        ? `All OCR models exhausted. Falling back to Local OCR (Tesseract). (${response.status}: ${errText})`
+        : `Verify OCR is temporarily unavailable (${response.status}). Please try again shortly.`
+    ) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
   }
-  
-  throw new Error(`All OCR models exhausted. Falling back to Local OCR (Tesseract).`);
+
+  const result = await response.json();
+  const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    console.error("❌ No text in response:", JSON.stringify(result));
+    throw new Error("No text returned from Gemini");
+  }
+
+  return text;
 }
 
 function pickParsedInvoiceHeader(obj: any): InvoiceHeader {

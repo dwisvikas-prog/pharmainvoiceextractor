@@ -77,6 +77,18 @@ export const HEADER_SYNONYMS: Record<string, string[]> = {
 /** Set true to show the Raw PDF Text Data tab again. */
 export const SHOW_RAW_PDF_TEXT_TAB = false;
 
+/** Set true to show Local OCR (Tesseract) buttons and allow Local OCR fallback. */
+export const SHOW_LOCAL_OCR = false;
+
+/** Set true to auto-extract rows on PDF upload (fast PDF text + extra-page OCR). Off = preview only; use Verify OCR. */
+export const SHOW_AUTO_FETCH_ON_UPLOAD = false;
+
+/** Set true to show Auto-Fill Header Meta into Rows and apply it on extract/save/add row. */
+export const SHOW_AUTO_FILL_HEADER = false;
+
+/** Set true to unfold Pay buttons on the lock/plans screen. Keep false until live checkout is ready — Contact us stays visible. */
+export const SHOW_PAYMENT_CHECKOUT = false;
+
 /** Blank cells in these columns become 0. Text fields (name, date, barcode, etc.) stay empty. */
 export const ZERO_FILL_COLUMNS = [
   "QTY", "F.QTY", "HALFP", "FTRATE", "SRATE", "MRP", "DIS", "EXCISE",
@@ -84,15 +96,3 @@ export const ZERO_FILL_COLUMNS = [
   "CGST", "SGST", "IGST", "PSRLNO", "TCSPER", "TCSAMT", "ALTERCODE", "PONUMBER"
 ];
 
-export type AppThemeId = 'paper' | 'yellow' | 'mint' | 'sky' | 'peach' | 'ocean' | 'coral' | 'slate';
-
-export const THEME_OPTIONS: { id: AppThemeId; label: string; swatch: string; hasShapes: boolean }[] = [
-  { id: 'paper', label: 'Paper', swatch: 'linear-gradient(135deg, #f4e6e0, #e8f0f4, #f3e6d4)', hasShapes: false },
-  { id: 'yellow', label: 'Sunshine', swatch: '#f4c400', hasShapes: true },
-  { id: 'mint', label: 'Mint', swatch: '#7dcea0', hasShapes: true },
-  { id: 'sky', label: 'Sky', swatch: '#5dade2', hasShapes: true },
-  { id: 'peach', label: 'Peach', swatch: '#f5b48a', hasShapes: true },
-  { id: 'ocean', label: 'Ocean', swatch: '#1abc9c', hasShapes: true },
-  { id: 'coral', label: 'Coral', swatch: '#f1948a', hasShapes: true },
-  { id: 'slate', label: 'Slate', swatch: '#94a3b8', hasShapes: true },
-];

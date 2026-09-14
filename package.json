@@ -10,6 +10,7 @@
     "github": "node scripts/git-push.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
     "lucide-react": "^0.468.0",
     "pdfjs-dist": "3.11.174",
     "react": "^18.2.0",

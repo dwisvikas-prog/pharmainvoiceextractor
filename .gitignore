@@ -6,3 +6,5 @@ dist/
 *.zip
 .vercel
 .cursor/
+.idea/
+graphify-out/
