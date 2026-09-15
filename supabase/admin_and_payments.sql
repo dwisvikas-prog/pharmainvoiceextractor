@@ -91,10 +91,12 @@ as $$
 declare
   result public.entitlements;
 begin
+  -- Strict duration: a paid plan always gets exactly `days` from the moment of
+  -- payment, never stacked on top of whatever was left on the old plan/trial.
   update public.entitlements
     set plan = new_plan,
         billing_cycle = new_cycle,
-        expires_at = greatest(expires_at, now()) + make_interval(days => days)
+        expires_at = now() + make_interval(days => days)
     where user_id = target_user_id
     returning * into result;
 
