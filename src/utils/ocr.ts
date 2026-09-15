@@ -652,12 +652,17 @@ export async function performGeminiOcrOnCanvas(canvas: HTMLCanvasElement): Promi
    - "CGST": CGST percentage rate or amount.
    - "SGST": SGST/UTGST percentage rate or amount.
    - "IGST": IGST percentage rate or amount.
-   - "COMPANY": Manufacturer or Pharmaceutical brand company name (e.g., "LARENO", "DR REDDY").
+   - "COMPANY": Manufacturer / Pharma company name. Look for a table column named
+     "COMPANY", "MFG", "MFG CO", "MFR", "MFR NAME", "MANUFACTURER", "MAKER", "CO.", or
+     "BRAND" — pharma invoices often print this per line item (e.g., "LARENO", "DR REDDY",
+     "CIPLA", "SUN PHARMA"). If the table genuinely has no such column for that row, set
+     "COMPANY" to an empty string "" — always include the key, never omit it.
 
 4. STRICT JSON OUTPUT:
    - Output ONLY a single JSON object with this shape:
-     {"supplier":"","billNo":"","date":"","items":[]}
-   - supplier = seller/distributor name, billNo = invoice/bill number, date = invoice/bill date.`;
+     {"supplier":"","billNo":"","date":"","items":[{"ITEM NAME":"","PACK":"","BATCH":"","EXPIRY":"","QTY":"","F.QTY":"","FTRATE":"","SRATE":"","MRP":"","DIS":"","AMOUNT":"","HSNCODE":"","CGST":"","SGST":"","IGST":"","COMPANY":""}]}
+   - supplier = seller/distributor name, billNo = invoice/bill number, date = invoice/bill date.
+   - Every item object must include every key shown above, using "" for anything not present in that row.`;
 
   const payload = {
     contents: [{

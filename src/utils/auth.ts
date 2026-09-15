@@ -254,6 +254,19 @@ export const loginUser = async (payload: AuthPayload): Promise<AuthSession> => {
   return buildSession(data.user.id, email, name, data.session.access_token, sessionToken, row);
 };
 
+// Fresh Supabase access token for calling authenticated serverless
+// endpoints (e.g. Razorpay order create/verify) - session.token can go
+// stale after an hour, so read it live instead.
+export const getAccessToken = async (): Promise<string | null> => {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? null;
+};
+
+export const resendConfirmationEmail = async (email: string): Promise<void> => {
+  const { error } = await supabase.auth.resend({ type: 'signup', email: email.trim().toLowerCase() });
+  if (error) throw new Error(error.message);
+};
+
 export const logoutSession = async (session?: AuthSession | null) => {
   if (session?.sessionToken) {
     try {

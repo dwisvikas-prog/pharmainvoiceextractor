@@ -86,8 +86,28 @@ export const SHOW_AUTO_FETCH_ON_UPLOAD = false;
 /** Set true to show Auto-Fill Header Meta into Rows and apply it on extract/save/add row. */
 export const SHOW_AUTO_FILL_HEADER = false;
 
-/** Set true to unfold Pay buttons on the lock/plans screen. Keep false until live checkout is ready — Contact us stays visible. */
-export const SHOW_PAYMENT_CHECKOUT = false;
+/** Shows Razorpay "Pay" buttons on the lock/plans screen. Needs RAZORPAY_KEY_ID and
+ *  RAZORPAY_KEY_SECRET set in Vercel (see api/razorpay-create-order.js) — without them,
+ *  clicking Pay fails with a clear "payments not configured" message. Contact us stays visible either way. */
+export const SHOW_PAYMENT_CHECKOUT = true;
+
+/** Feature list shown on plan cards (landing page + paywall). Order matters: a plan's
+ *  includedCount from TAP_TIER_INCLUDED marks how many from the top are included. */
+export const TAP_PLAN_FEATURES = [
+  'Invoice PDF / image upload',
+  'Preview cutoffs',
+  'Metadata Save',
+  '34-column ERP table',
+  'Excel export',
+  'Verify OCR (current page)',
+  'Verify OCR (all pages)',
+  'Multi-page invoices'
+];
+
+export const TAP_TIER_INCLUDED: Record<'basic' | 'premium', number> = {
+  basic: 6,
+  premium: 8
+};
 
 /** Blank cells in these columns become 0. Text fields (name, date, barcode, etc.) stay empty. */
 export const ZERO_FILL_COLUMNS = [

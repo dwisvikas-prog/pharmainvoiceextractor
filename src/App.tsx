@@ -18,24 +18,26 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
 }
 
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import {
   FileText, Upload, Download, Sparkles, RefreshCw,
   Eye, Table as TableIcon, ZoomIn, ZoomOut,
   ChevronRight, ChevronLeft, ChevronDown, Search, Plus, Scan, Trash2,
-  Pill, Zap, RotateCcw, RotateCw
+  Pill, Zap, RotateCcw, RotateCw, Menu, X, CheckCircle2, Save, Mail, Clock
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import * as XLSX from 'xlsx';
-import { ERP_COLUMNS, SHOW_RAW_PDF_TEXT_TAB, SHOW_LOCAL_OCR, SHOW_AUTO_FETCH_ON_UPLOAD, SHOW_AUTO_FILL_HEADER, SHOW_PAYMENT_CHECKOUT, ZERO_FILL_COLUMNS } from './utils/constants';
+import { ERP_COLUMNS, SHOW_RAW_PDF_TEXT_TAB, SHOW_LOCAL_OCR, SHOW_AUTO_FETCH_ON_UPLOAD, SHOW_AUTO_FILL_HEADER, SHOW_PAYMENT_CHECKOUT, ZERO_FILL_COLUMNS, TAP_PLAN_FEATURES, TAP_TIER_INCLUDED } from './utils/constants';
 import { ErpRow, InvoiceHeader, RawTextLine, normalizeToErpRows, performGeminiOcrOnCanvas, performTesseractOcrOnCanvas, parseTesseractTextToStructuredData, performGeminiVerbatimOcrOnCanvas } from './utils/ocr';
 import { extractAllPagesData, loadPdfDocument, renderPdfPageToCanvas } from './utils/pdfExtraction';
 import UploadMenu from './components/UploadMenu';
 import AccessPaywall from './components/AccessPaywall';
 import MetadataPanel from './components/MetadataPanel';
 import StudioTable from './components/StudioTable';
-import { getStoredSession, getDaysUntilExpiry, isExpiryWarningWindow, loginUser, logoutSession, registerUser, redeemPasscode, TRIAL_DAYS, PLAN_PRICING, getAccessBlockReason, getVerifyOcrLimit, recordVerifyOcrPages, isSessionStillActive, SessionInvalidatedError, type AuthSession, type PlanId, type BillingCycle } from './utils/auth';
+import AdminPanel from './components/AdminPanel';
+import { payForPlan } from './utils/payments';
+import { getStoredSession, getDaysUntilExpiry, isExpiryWarningWindow, loginUser, logoutSession, registerUser, redeemPasscode, resendConfirmationEmail, TRIAL_DAYS, PLAN_PRICING, getAccessBlockReason, getVerifyOcrLimit, recordVerifyOcrPages, isSessionStillActive, SessionInvalidatedError, type AuthSession, type PlanId, type BillingCycle } from './utils/auth';
 import dwisLogo from './assets/dwis-logo.png';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -107,24 +109,28 @@ const landingFeatures = [
   {
     title: 'Invoice upload',
     description: 'Drop a bill PDF or image into TAP. Preview the page, then set cutoffs before you extract.',
-    accent: 'from-blue-500 to-blue-700'
+    accent: 'from-blue-500 to-blue-700',
+    icon: Upload
   },
   {
     title: 'OCR current & all pages',
     description: SHOW_LOCAL_OCR
       ? 'Run Local or Verify OCR on the page you are viewing, or process every page of a multi-page invoice.'
       : 'Run Verify OCR on the page you are viewing, or process every page of a multi-page invoice.',
-    accent: 'from-blue-600 to-indigo-600'
+    accent: 'from-blue-600 to-indigo-600',
+    icon: Scan
   },
   {
     title: '34-column ERP table',
     description: 'Review supplier, bill number, date, and line items in an editable table that matches your ERP layout.',
-    accent: 'from-sky-500 to-blue-600'
+    accent: 'from-sky-500 to-blue-600',
+    icon: TableIcon
   },
   {
     title: 'Excel export',
     description: 'Save metadata into rows, then export a clean workbook when the table has data ready for operations.',
-    accent: 'from-blue-500 to-sky-600'
+    accent: 'from-blue-500 to-sky-600',
+    icon: Download
   }
 ];
 
@@ -134,26 +140,16 @@ const workflowSteps = [
   'Save, then export Excel'
 ];
 
-const tapTools = ['PDF / Image', 'Preview cutoffs', 'Metadata Save', 'OCR current page', 'OCR all pages', 'Excel export'];
-
-const TAP_PLAN_FEATURES = [
-  'Invoice PDF / image upload',
-  'Preview cutoffs',
-  'Metadata Save',
-  '34-column ERP table',
-  'Excel export',
-  'Verify OCR (current page)',
-  'Verify OCR (all pages)',
-  'Multi-page invoices'
+const tapTools = [
+  { label: 'PDF / Image', icon: FileText },
+  { label: 'Preview cutoffs', icon: Eye },
+  { label: 'Metadata Save', icon: Save },
+  { label: 'OCR current page', icon: Scan },
+  { label: 'OCR all pages', icon: Zap },
+  { label: 'Excel export', icon: Download }
 ];
 
 type PricingTab = 'trial' | 'monthly' | 'annually';
-type PlanTier = 'basic' | 'premium';
-
-const TAP_TIER_INCLUDED: Record<PlanTier, number> = {
-  basic: 6,
-  premium: 8
-};
 
 const PRICING_CONTACT = { tel: '9988336023', href: 'tel:9988336023' };
 
@@ -196,7 +192,7 @@ function TapPricingCard({
   includedCount: number;
 }) {
   return (
-    <div className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
+    <div className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition duration-200 hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg">
       <div className="inline-flex w-fit rounded bg-[#1e86bb] px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-white">{badge}</div>
       <h5 className="mt-3 text-lg font-bold text-slate-900">{title}</h5>
       <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
@@ -246,6 +242,20 @@ export default function App() {
   const [ocrUsageCount, setOcrUsageCount] = useState(0);
   const [selectedUploadType, setSelectedUploadType] = useState<'excel' | 'text' | null>(null);
   const [showMasterMenu, setShowMasterMenu] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+  const [pendingConfirmationEmail, setPendingConfirmationEmail] = useState('');
+  const [resendStatus, setResendStatus] = useState('');
+  const [isResending, setIsResending] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const id = window.setInterval(() => {
+      setResendCooldown((s) => Math.max(0, s - 1));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [resendCooldown]);
   const [activeView, setActiveView] = useState<'extractor' | 'csv'>('extractor');
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvContent, setCsvContent] = useState<string>('');
@@ -396,7 +406,36 @@ export default function App() {
       setAuthEmail('');
       setAuthPassword('');
     } catch (error: any) {
-      setAuthError(error?.message || 'Authentication failed.');
+      const message = error?.message || 'Authentication failed.';
+      if (message.includes('Check your email to confirm') || message.toLowerCase().includes('email not confirmed')) {
+        setPendingConfirmationEmail(authEmail.trim());
+        setResendStatus('');
+        setResendCooldown(0);
+        setAuthName('');
+        setAuthPassword('');
+        return;
+      }
+      setAuthError(message);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    if (!pendingConfirmationEmail || resendCooldown > 0) return;
+    setIsResending(true);
+    setResendStatus('');
+    try {
+      await resendConfirmationEmail(pendingConfirmationEmail);
+      setResendStatus('Confirmation email sent again. Check your inbox (and spam folder).');
+    } catch (error: any) {
+      const message = error?.message || 'Could not resend email. Try again shortly.';
+      const waitMatch = message.match(/after (\d+) seconds?/i);
+      if (waitMatch) {
+        setResendCooldown(Number(waitMatch[1]));
+      } else {
+        setResendStatus(message);
+      }
+    } finally {
+      setIsResending(false);
     }
   };
 
@@ -406,28 +445,48 @@ export default function App() {
     setAuthSuccess('Logged out successfully.');
   };
 
-  const handlePasscodeSubmit = async () => {
-    if (!session) return;
+  // Shared by the header "Extend trial" modal and the inline passcode box on
+  // the locked/paywall screen - both just need a code in, result out.
+  const submitPasscode = async (code: string): Promise<{ ok: boolean; message: string; invalidated?: boolean }> => {
+    if (!session) return { ok: false, message: 'Not logged in.' };
     try {
-      const next = await redeemPasscode(session, passcode);
+      const next = await redeemPasscode(session, code);
       setSession(next);
-      setPasscode('');
-      setShowPasscodeModal(false);
-      setPasscodeMessage(`Trial extended by ${TRIAL_DAYS} days.`);
+      return { ok: true, message: `Trial extended by ${TRIAL_DAYS} days.` };
     } catch (error: any) {
       if (error instanceof SessionInvalidatedError) {
-        setShowPasscodeModal(false);
         setSession(null);
         setSessionKickedOutMessage(error.message);
-        return;
+        return { ok: false, message: error.message, invalidated: true };
       }
-      setPasscodeMessage(error?.message || 'Invalid passcode. Please try again.');
+      return { ok: false, message: error?.message || 'Invalid passcode. Please try again.' };
     }
   };
 
-  const handleActivatePlan = (_plan: Exclude<PlanId, 'trial'>, _cycle: BillingCycle) => {
+  const handlePasscodeSubmit = async () => {
+    const result = await submitPasscode(passcode);
+    if (result.invalidated) {
+      setShowPasscodeModal(false);
+      return;
+    }
+    setPasscodeMessage(result.message);
+    if (result.ok) {
+      setPasscode('');
+      setShowPasscodeModal(false);
+    }
+  };
+
+  const handleActivatePlan = async (plan: Exclude<PlanId, 'trial'>, cycle: BillingCycle) => {
     if (!session) return;
-    setStatusMsg('Online checkout is not live yet. Contact us to activate a paid plan.');
+    setStatusMsg('Opening payment…');
+    try {
+      const result = await payForPlan({ planId: plan, billingCycle: cycle, name: session.user.name, email: session.user.email });
+      setSession((prev) => prev ? { ...prev, plan: result.plan as PlanId, billingCycle: result.billingCycle as BillingCycle, expiresAt: result.expiresAt } : prev);
+      setStatusMsg(`Payment successful. ${plan === 'pro' ? 'Premium' : 'Basic'} plan is now active.`);
+      setTimeout(() => window.location.reload(), 1200);
+    } catch (error: any) {
+      setStatusMsg(error?.message || 'Payment could not be completed.');
+    }
   };
 
   const handlePlanSelection = (nextPlan: 'basic' | 'pro', nextCycle: 'monthly' | 'yearly') => {
@@ -1250,6 +1309,10 @@ const handleConvertPdfToCsv = async () => {
     setTableData(updated);
   };
 
+  if (typeof window !== 'undefined' && window.location.hash === '#admin') {
+    return <AdminPanel />;
+  }
+
   if (!session) {
     return (
       <div className="min-h-screen bg-[#f8fafc] text-slate-900">
@@ -1274,10 +1337,10 @@ const handleConvertPdfToCsv = async () => {
         <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-md">
           <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
             <div className="flex items-center gap-3">
-              <img src={dwisLogo} alt="DWIS TAP" className="h-12 w-auto object-contain sm:h-14" />
+              <img src={dwisLogo} alt="DWIS TAP" className="h-10 w-auto object-contain sm:h-14" />
             </div>
 
-            <nav className="flex flex-1 flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm font-medium text-slate-600">
+            <nav className="hidden flex-1 flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm font-medium text-slate-600 lg:flex">
               <a href="#how" className="transition hover:text-slate-900">How DWIS TAP works</a>
               <a href="#features" className="transition hover:text-slate-900">Features</a>
               <a href="#tools" className="transition hover:text-slate-900">Tools</a>
@@ -1287,7 +1350,7 @@ const handleConvertPdfToCsv = async () => {
               <a href="#auth" className="transition hover:text-slate-900">Account</a>
             </nav>
 
-            <div className="flex items-center gap-3">
+            <div className="hidden items-center gap-3 lg:flex">
               <button
                 type="button"
                 onClick={() => openAuth('login')}
@@ -1297,7 +1360,7 @@ const handleConvertPdfToCsv = async () => {
               </button>
               <a
                 href={PRICING_CONTACT.href}
-                className="hidden rounded-full border border-[#1e86bb] px-4 py-2 text-sm font-semibold text-[#1e86bb] no-underline sm:inline-flex"
+                className="rounded-full border border-[#1e86bb] px-4 py-2 text-sm font-semibold text-[#1e86bb] no-underline"
               >
                 {PRICING_CONTACT.tel}
               </a>
@@ -1309,142 +1372,232 @@ const handleConvertPdfToCsv = async () => {
                 Register
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setIsMobileNavOpen((prev) => !prev)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-700 transition hover:bg-slate-50 lg:hidden"
+              aria-label={isMobileNavOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={isMobileNavOpen}
+            >
+              {isMobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
           </div>
+
+          {isMobileNavOpen && (
+            <div className="border-t border-slate-200 bg-white px-4 py-4 lg:hidden">
+              <nav className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+                <a href="#how" onClick={() => setIsMobileNavOpen(false)} className="rounded-lg px-2 py-2.5 transition hover:bg-slate-50">How DWIS TAP works</a>
+                <a href="#features" onClick={() => setIsMobileNavOpen(false)} className="rounded-lg px-2 py-2.5 transition hover:bg-slate-50">Features</a>
+                <a href="#tools" onClick={() => setIsMobileNavOpen(false)} className="rounded-lg px-2 py-2.5 transition hover:bg-slate-50">Tools</a>
+                <a href="#plans" onClick={() => setIsMobileNavOpen(false)} className="rounded-lg px-2 py-2.5 transition hover:bg-slate-50">Plans</a>
+                <a href="#faq" onClick={() => setIsMobileNavOpen(false)} className="rounded-lg px-2 py-2.5 transition hover:bg-slate-50">FAQ</a>
+                <a href="#support" onClick={() => setIsMobileNavOpen(false)} className="rounded-lg px-2 py-2.5 transition hover:bg-slate-50">Support</a>
+                <a href="#auth" onClick={() => setIsMobileNavOpen(false)} className="rounded-lg px-2 py-2.5 transition hover:bg-slate-50">Account</a>
+              </nav>
+              <div className="mt-3 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setIsMobileNavOpen(false); openAuth('login'); }}
+                  className="w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                >
+                  Login
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setIsMobileNavOpen(false); openAuth('register'); }}
+                  className="w-full rounded-full bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-cta transition hover:bg-blue-700"
+                >
+                  Register
+                </button>
+                <a
+                  href={PRICING_CONTACT.href}
+                  className="w-full rounded-full border border-[#1e86bb] px-4 py-2.5 text-center text-sm font-semibold text-[#1e86bb] no-underline"
+                >
+                  Call {PRICING_CONTACT.tel}
+                </a>
+              </div>
+            </div>
+          )}
         </header>
 
         <main>
-          <section className="bg-white">
-            <div className="mx-auto grid max-w-7xl items-center gap-10 px-6 py-16 lg:grid-cols-[1.15fr_0.85fr] lg:py-20">
+          <section className="relative overflow-hidden bg-white">
+            <div className="pointer-events-none absolute -top-24 -left-24 h-72 w-72 rounded-full bg-blue-100/60 blur-3xl" aria-hidden="true" />
+            <div className="pointer-events-none absolute -right-24 top-10 h-80 w-80 rounded-full bg-blue-50 blur-3xl" aria-hidden="true" />
+            <div className="relative mx-auto grid max-w-7xl items-center gap-8 px-4 py-10 sm:gap-10 sm:px-6 sm:py-16 lg:grid-cols-[1.15fr_0.85fr] lg:py-20">
               <div>
                 <div className="mb-4 inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700">
                   Invoice extractor
                 </div>
-                <h1 className="max-w-xl text-4xl font-black tracking-tight text-slate-900 sm:text-5xl">
+                <h1 className="max-w-xl text-3xl font-black leading-tight tracking-tight text-slate-900 sm:text-4xl sm:leading-tight lg:text-5xl">
                   Upload invoices. Extract. Export Excel.
                 </h1>
-                <p className="mt-5 max-w-xl text-lg text-slate-600">
+                <p className="mt-4 max-w-xl text-base text-slate-600 sm:mt-5 sm:text-lg">
                   DWIS TAP turns bill PDFs and images into an editable 34-column ERP table — with preview cutoffs, metadata Save, OCR on the current page or all pages, then Excel export.
                 </p>
-                <div className="mt-7 flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => openAuth('register')}
-                    className="rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-cta transition hover:bg-blue-700"
-                  >
-                    Register
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openAuth('login')}
-                    className="rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-800 transition hover:border-slate-300 hover:bg-slate-50"
-                  >
-                    Login
-                  </button>
-                </div>
-                <div className="mt-8 flex flex-wrap gap-4 text-sm text-slate-600">
+                <div className="mt-8 grid grid-cols-2 gap-2.5 text-sm text-slate-600 sm:mt-10 sm:flex sm:flex-wrap sm:gap-4">
                   {landingStats.map((item) => (
-                    <div key={item.label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                      <div className="text-xl font-bold text-slate-900">{item.value}</div>
+                    <div key={item.label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 sm:py-2">
+                      <div className="text-lg font-bold text-slate-900 sm:text-xl">{item.value}</div>
                       <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500">{item.label}</div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div id="auth" className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card scroll-mt-24">
-                <div className="mb-4 flex items-center gap-2">
-                  <button type="button" onClick={() => setAuthMode('login')} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${authMode === 'login' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-white text-slate-700'}`}>Login</button>
-                  <button type="button" onClick={() => setAuthMode('register')} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${authMode === 'register' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-white text-slate-700'}`}>Register</button>
-                </div>
-                <h2 className="text-xl font-black tracking-tight text-slate-900">
-                  {authMode === 'login' ? 'Login to TAP' : 'Create a TAP account'}
-                </h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  After login you get upload, preview cutoffs, metadata Save, OCR, the 34-column table, and Excel export.
-                </p>
-                <p className="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
-                  One active session per account: signing in on another device or browser will sign you out here.
-                  Do not share your login across multiple devices — repeated multi-device logins may lead to account suspension.
-                </p>
-                <form onSubmit={handleAuthSubmit} className="mt-4 space-y-3">
-                  {authMode === 'register' && (
-                    <div>
-                      <label className="mb-1 block text-[11px] font-medium text-slate-600">Full Name</label>
-                      <input
-                        value={authName}
-                        onChange={(e) => setAuthName(e.target.value)}
-                        className="w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
-                        placeholder="Your full name"
-                        required={authMode === 'register'}
-                      />
+              <div id="auth" className="rounded-3xl border border-slate-200 bg-white p-4 shadow-card scroll-mt-24 sm:p-5">
+                {pendingConfirmationEmail ? (
+                  <div className="flex flex-col items-center py-3 text-center">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                      <Mail className="h-7 w-7" />
                     </div>
-                  )}
-                  <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-600">Email</label>
-                    <input
-                      type="email"
-                      value={authEmail}
-                      onChange={(e) => setAuthEmail(e.target.value)}
-                      className="w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
-                      placeholder="you@example.com"
-                      required
-                    />
+                    <h2 className="mt-4 text-xl font-black tracking-tight text-slate-900">Confirm your email to continue</h2>
+                    <p className="mt-2 max-w-xs text-sm text-slate-600">
+                      <span className="font-semibold text-slate-900">{pendingConfirmationEmail}</span> is not confirmed yet. Open the confirmation link we sent to that inbox, then come back here and log in.
+                    </p>
+                    <p className="mt-2 text-xs text-slate-400">Can't find it? Check your spam or promotions folder, or resend it below.</p>
+                    {resendStatus && <p className="mt-3 text-xs font-medium text-blue-700">{resendStatus}</p>}
+                    <div className="mt-5 flex w-full flex-col items-center gap-3 sm:flex-row sm:justify-center">
+                      <div className="relative inline-flex">
+                        <button
+                          type="button"
+                          onClick={handleResendConfirmation}
+                          disabled={isResending || resendCooldown > 0}
+                          className="rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isResending ? 'Resending…' : 'Resend confirmation email'}
+                        </button>
+                        {resendCooldown > 0 && (
+                          <span className="absolute -top-2.5 -right-2.5 flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 shadow-sm animate-pulse">
+                            <Clock className="h-3 w-3" />
+                            {resendCooldown}s
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { setPendingConfirmationEmail(''); setResendStatus(''); setAuthMode('login'); }}
+                        className="rounded-full bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-cta transition hover:bg-blue-700"
+                      >
+                        Back to Login
+                      </button>
+                    </div>
+                    {resendCooldown > 0 && (
+                      <p className="mt-2 text-[11px] text-slate-400">For security, you can resend again in {resendCooldown}s.</p>
+                    )}
                   </div>
-                  <div>
-                    <label className="mb-1 block text-[11px] font-medium text-slate-600">Password</label>
-                    <input
-                      type="password"
-                      value={authPassword}
-                      onChange={(e) => setAuthPassword(e.target.value)}
-                      className="w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
-                      placeholder="••••••••"
-                      required
-                    />
-                  </div>
-                  {authError && <p className="text-xs text-red-600">{authError}</p>}
-                  {authSuccess && <p className="text-xs text-emerald-600">{authSuccess}</p>}
-                  <button type="submit" className="w-full rounded-full bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-cta transition hover:bg-blue-700">
-                    {authMode === 'login' ? 'Login to DWIS TAP' : 'Create account'}
-                  </button>
-                </form>
+                ) : (
+                  <>
+                    <div className="mb-4 flex items-center gap-2">
+                      <button type="button" onClick={() => setAuthMode('login')} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${authMode === 'login' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-white text-slate-700'}`}>Login</button>
+                      <button type="button" onClick={() => setAuthMode('register')} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${authMode === 'register' ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-white text-slate-700'}`}>Register</button>
+                    </div>
+                    <h2 className="text-xl font-black tracking-tight text-slate-900">
+                      {authMode === 'login' ? 'Login to TAP' : 'Create a TAP account'}
+                    </h2>
+                    <ul className="mt-3 space-y-1.5 text-sm text-slate-600">
+                      {['Upload, preview cutoffs, metadata Save', 'Verify OCR — current page or all pages', '34-column ERP table, then Excel export'].map((line) => (
+                        <li key={line} className="flex items-start gap-2">
+                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+                          <span>{line}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                      One active session per account: signing in on another device or browser will sign you out here.
+                      Do not share your login across multiple devices — repeated multi-device logins may lead to account suspension.
+                    </p>
+                    <form onSubmit={handleAuthSubmit} className="mt-4 space-y-3">
+                      {authMode === 'register' && (
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium text-slate-600">Full Name</label>
+                          <input
+                            value={authName}
+                            onChange={(e) => setAuthName(e.target.value)}
+                            className="w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+                            placeholder="Your full name"
+                            required={authMode === 'register'}
+                          />
+                        </div>
+                      )}
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-600">Email</label>
+                        <input
+                          type="email"
+                          value={authEmail}
+                          onChange={(e) => setAuthEmail(e.target.value)}
+                          className="w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+                          placeholder="you@example.com"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-600">Password</label>
+                        <input
+                          type="password"
+                          value={authPassword}
+                          onChange={(e) => setAuthPassword(e.target.value)}
+                          className="w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+                          placeholder="••••••••"
+                          required
+                        />
+                      </div>
+                      {authError && <p className="text-xs text-red-600">{authError}</p>}
+                      {authSuccess && <p className="text-xs text-emerald-600">{authSuccess}</p>}
+                      <button type="submit" className="w-full rounded-full bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-cta transition hover:bg-blue-700">
+                        {authMode === 'login' ? 'Login to DWIS TAP' : 'Create account'}
+                      </button>
+                    </form>
+                  </>
+                )}
               </div>
             </div>
           </section>
 
-          <section id="how" className="scroll-mt-24 bg-slate-50 py-14 text-slate-900">
-            <div className="mx-auto max-w-7xl px-6">
+          <section id="how" className="scroll-mt-24 bg-slate-50 py-10 sm:py-14 text-slate-900">
+            <div className="mx-auto max-w-7xl px-4 sm:px-6">
               <div className="mx-auto max-w-2xl text-center">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">How DWIS TAP works</p>
                 <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-900">Upload, extract, export Excel.</h2>
               </div>
-              <div className="mt-10 grid gap-5 md:grid-cols-3">
+              <div className="mt-10 flex flex-col gap-5 md:flex-row md:items-stretch md:gap-3">
                 {workflowSteps.map((step, index) => (
-                  <div key={step} className="rounded-2xl border border-slate-200 bg-white p-5">
-                    <div className="mb-4 flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
-                      {index + 1}
+                  <Fragment key={step}>
+                    <div className="flex-1 rounded-2xl border border-slate-200 bg-white p-5 transition duration-200 hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg">
+                      <div className="mb-4 flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
+                        {index + 1}
+                      </div>
+                      <p className="text-lg font-bold text-slate-900">{step}</p>
+                      <p className="mt-2 text-sm text-slate-600">
+                        {index === 0 && 'Upload a bill PDF or image, then set preview cutoffs if the page has extra header or footer text.'}
+                        {index === 1 && 'Check supplier, bill number, date, and the 34-column table. Use OCR on this page or every page when needed.'}
+                        {index === 2 && 'Save metadata into rows, then export Excel when the table has product lines.'}
+                      </p>
                     </div>
-                    <p className="text-lg font-bold text-slate-900">{step}</p>
-                    <p className="mt-2 text-sm text-slate-600">
-                      {index === 0 && 'Upload a bill PDF or image, then set preview cutoffs if the page has extra header or footer text.'}
-                      {index === 1 && 'Check supplier, bill number, date, and the 34-column table. Use OCR on this page or every page when needed.'}
-                      {index === 2 && 'Save metadata into rows, then export Excel when the table has product lines.'}
-                    </p>
-                  </div>
+                    {index < workflowSteps.length - 1 && (
+                      <div className="hidden shrink-0 items-center justify-center text-slate-300 md:flex">
+                        <ChevronRight className="h-6 w-6" />
+                      </div>
+                    )}
+                  </Fragment>
                 ))}
               </div>
             </div>
           </section>
 
-          <section id="features" className="scroll-mt-24 bg-white py-14 text-slate-900">
-            <div className="mx-auto max-w-7xl px-6">
+          <section id="features" className="scroll-mt-24 bg-white py-10 sm:py-14 text-slate-900">
+            <div className="mx-auto max-w-7xl px-4 sm:px-6">
               <div className="mx-auto max-w-2xl text-center">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">Features</p>
                 <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-900">DWIS TAP invoice tools.</h2>
               </div>
               <div className="mt-10 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
                 {landingFeatures.map((feature) => (
-                  <div key={feature.title} className="rounded-2xl border border-slate-200 bg-slate-50 p-5 shadow-sm">
-                    <div className={`mb-4 h-11 w-11 rounded-xl bg-gradient-to-br ${feature.accent} shadow-md`} />
+                  <div key={feature.title} className="group rounded-2xl border border-slate-200 bg-slate-50 p-5 shadow-sm transition duration-200 hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg">
+                    <div className={`mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${feature.accent} shadow-md transition group-hover:scale-105`}>
+                      <feature.icon className="h-5 w-5 text-white" />
+                    </div>
                     <h3 className="text-lg font-bold text-slate-900">{feature.title}</h3>
                     <p className="mt-2 text-sm leading-6 text-slate-600">{feature.description}</p>
                   </div>
@@ -1453,24 +1606,25 @@ const handleConvertPdfToCsv = async () => {
             </div>
           </section>
 
-          <section id="tools" className="scroll-mt-24 bg-slate-50 py-14 text-slate-900">
-            <div className="mx-auto max-w-7xl px-6">
+          <section id="tools" className="scroll-mt-24 bg-slate-50 py-10 sm:py-14 text-slate-900">
+            <div className="mx-auto max-w-7xl px-4 sm:px-6">
               <div className="mx-auto max-w-2xl text-center">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">Tools</p>
                 <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-900">What you use after login.</h2>
               </div>
               <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {tapTools.map((item) => (
-                  <div key={item} className="rounded-xl border border-slate-200 bg-white px-4 py-4 text-center text-sm font-semibold text-slate-800">
-                    {item}
+                  <div key={item.label} className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm font-semibold text-slate-800 transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md">
+                    <item.icon className="h-4 w-4 shrink-0 text-blue-600" />
+                    <span>{item.label}</span>
                   </div>
                 ))}
               </div>
             </div>
           </section>
 
-          <section id="plans" className="scroll-mt-24 bg-white py-14 text-slate-900">
-            <div className="mx-auto max-w-6xl px-6">
+          <section id="plans" className="scroll-mt-24 bg-white py-10 sm:py-14 text-slate-900">
+            <div className="mx-auto max-w-6xl px-4 sm:px-6">
               <div className="mx-auto max-w-2xl text-center">
                 <h2 className="text-3xl font-black tracking-tight text-slate-900">Plans</h2>
                 <p className="mt-3 text-lg text-slate-600">Register for a 15-day trial. Paid plans via Contact us. When days or OCR pages end, the studio locks until the next plan is active.</p>
@@ -1554,25 +1708,38 @@ const handleConvertPdfToCsv = async () => {
             </div>
           </section>
 
-          <section id="faq" className="scroll-mt-24 bg-slate-50 py-14 text-slate-900">
-            <div className="mx-auto max-w-4xl px-6">
+          <section id="faq" className="scroll-mt-24 bg-slate-50 py-10 sm:py-14 text-slate-900">
+            <div className="mx-auto max-w-4xl px-4 sm:px-6">
               <div className="mx-auto max-w-2xl text-center">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">FAQ</p>
                 <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-900">DWIS TAP questions.</h2>
               </div>
-              <div className="mt-10 space-y-4">
-                {tapFaqs.map((item) => (
-                  <div key={item.question} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <p className="text-lg font-bold text-slate-900">{item.question}</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">{item.answer}</p>
-                  </div>
-                ))}
+              <div className="mt-10 space-y-3">
+                {tapFaqs.map((item, index) => {
+                  const isOpen = openFaqIndex === index;
+                  return (
+                    <div key={item.question} className={`rounded-2xl border bg-white shadow-sm transition ${isOpen ? 'border-blue-200' : 'border-slate-200'}`}>
+                      <button
+                        type="button"
+                        onClick={() => setOpenFaqIndex(isOpen ? null : index)}
+                        aria-expanded={isOpen}
+                        className="flex w-full items-center justify-between gap-3 p-5 text-left"
+                      >
+                        <span className="text-base font-bold text-slate-900 sm:text-lg">{item.question}</span>
+                        <ChevronDown className={`h-5 w-5 shrink-0 text-blue-600 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      {isOpen && (
+                        <p className="px-5 pb-5 text-sm leading-6 text-slate-600">{item.answer}</p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </section>
 
-          <section id="support" className="scroll-mt-24 bg-white py-14 text-slate-900">
-            <div className="mx-auto max-w-3xl px-6">
+          <section id="support" className="scroll-mt-24 bg-white py-10 sm:py-14 text-slate-900">
+            <div className="mx-auto max-w-3xl px-4 sm:px-6">
               <div className="rounded-3xl border border-slate-200 bg-slate-50 p-6 shadow-card">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">Support</p>
                 <h2 className="mt-2 text-2xl font-bold text-slate-900">Need help with DWIS TAP?</h2>
@@ -1589,8 +1756,8 @@ const handleConvertPdfToCsv = async () => {
         <footer className="border-t border-slate-200 bg-white py-10 text-slate-600">
           <div className="mx-auto flex max-w-7xl flex-col gap-6 px-6 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-black tracking-tight text-slate-900">DWIS TAP</p>
-              <p className="mt-1 text-xs text-slate-500">Invoice extractor for PDF, OCR, 34-column ERP, and Excel.</p>
+              <img src={dwisLogo} alt="DWIS TAP" className="h-9 w-auto object-contain" />
+              <p className="mt-2 text-xs text-slate-500">Invoice extractor for PDF, OCR, 34-column ERP, and Excel.</p>
             </div>
             <div className="flex flex-wrap gap-4 text-sm">
               <a href="#how" className="hover:text-blue-700">How DWIS TAP works</a>
@@ -1640,6 +1807,7 @@ const handleConvertPdfToCsv = async () => {
           reason={accessBlock}
           onLogout={handleLogout}
           onActivatePlan={handleActivatePlan}
+          onRedeemPasscode={submitPasscode}
         />
         {showPasscodeModal && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 p-4">
@@ -1776,19 +1944,19 @@ const handleConvertPdfToCsv = async () => {
         </div>
       </header>
 
-      <div className="border-b border-slate-200 bg-white px-4 py-2 sm:px-6 flex flex-wrap items-center justify-between gap-2 text-xs">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="flex items-center space-x-1.5 text-slate-700 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200">
-            <RefreshCw className={`w-3.5 h-3.5 ${isProcessing ? 'animate-spin text-blue-600' : 'text-slate-400'}`} />
-            <span>{statusMsg}</span>
+      <div className="border-b border-slate-200 bg-white px-4 py-2.5 sm:px-6 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <span className="flex min-w-0 max-w-full items-center gap-1.5 text-slate-700 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200 sm:max-w-xs">
+            <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${isProcessing ? 'animate-spin text-blue-600' : 'text-slate-400'}`} />
+            <span className="truncate">{statusMsg}</span>
           </span>
-          <span className="bg-blue-50 text-blue-800 border border-blue-100 px-2.5 py-1.5 rounded-full font-medium">
+          <span className="shrink-0 bg-blue-50 text-blue-800 border border-blue-100 px-2.5 py-1.5 rounded-full font-medium">
             {tableData.length} Product Rows
           </span>
-          <span className="bg-white text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-full font-medium">
+          <span className="shrink-0 bg-white text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-full font-medium">
             Verify OCR: {session.ocrUsed} / {getVerifyOcrLimit(session.plan)} pages
           </span>
-          <span className="bg-white text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-full font-medium">
+          <span className="shrink-0 bg-white text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-full font-medium">
             Plan: {session.plan} · {getDaysUntilExpiry(session.expiresAt)} day(s) left
           </span>
         </div>
@@ -1976,16 +2144,17 @@ const handleConvertPdfToCsv = async () => {
                 canExport={tableData.length > 0}
               />
               {(pdfDoc || isScannedPdf) && (
-                <div className="ocr-banner border rounded-xl px-3 py-2 flex flex-wrap items-center gap-2 text-xs">
-                  <Scan className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                  <span className="font-semibold">
+                <div className="ocr-banner border rounded-xl px-3 py-2.5 flex flex-col gap-2 text-xs sm:flex-row sm:flex-wrap sm:items-center">
+                  <span className="flex items-center gap-1.5 font-semibold">
+                    <Scan className="w-4 h-4 text-blue-600 flex-shrink-0" />
                     {totalPages > 1 ? `PDF has ${totalPages} pages — OCR any missing page:` : 'Scanned invoice — choose OCR:'}
                   </span>
+                  <div className="flex flex-wrap items-center gap-2">
                   {SHOW_LOCAL_OCR && (
                   <button
                     onClick={() => handleRunTesseractOcr('current')}
                     disabled={isProcessing}
-                    className="ocr-btn ocr-btn-local py-1.5 px-3 rounded-full text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
+                    className="ocr-btn ocr-btn-local py-2 px-3 rounded-full text-[11px] font-semibold flex items-center gap-1 whitespace-nowrap transition disabled:opacity-50 sm:py-1.5"
                   >
                     <Scan className="w-3.5 h-3.5" />
                     <span>Local OCR (Current Page)</span>
@@ -1995,7 +2164,7 @@ const handleConvertPdfToCsv = async () => {
                     <button
                       onClick={() => handleRunTesseractOcr('all')}
                       disabled={isProcessing}
-                      className="ocr-btn ocr-btn-local py-1.5 px-3 rounded-full text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
+                      className="ocr-btn ocr-btn-local py-2 px-3 rounded-full text-[11px] font-semibold flex items-center gap-1 whitespace-nowrap transition disabled:opacity-50 sm:py-1.5"
                     >
                       <Scan className="w-3.5 h-3.5" />
                       <span>Local OCR (All Pages)</span>
@@ -2004,7 +2173,7 @@ const handleConvertPdfToCsv = async () => {
                   <button
                     onClick={() => handleRunAiOcr('current')}
                     disabled={isProcessing || aiRateLimited}
-                    className="ocr-btn ocr-btn-verify py-1.5 px-3 rounded-full text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
+                    className="ocr-btn ocr-btn-verify py-2 px-3 rounded-full text-[11px] font-semibold flex items-center gap-1 whitespace-nowrap transition disabled:opacity-50 sm:py-1.5"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>Verify OCR (Current Page)</span>
@@ -2013,12 +2182,13 @@ const handleConvertPdfToCsv = async () => {
                   <button
                     onClick={() => handleRunAiOcr('all')}
                     disabled={isProcessing || aiRateLimited}
-                    className="ocr-btn ocr-btn-all py-1.5 px-3 rounded-full text-[11px] font-semibold flex items-center space-x-1 transition disabled:opacity-50"
+                    className="ocr-btn ocr-btn-all py-2 px-3 rounded-full text-[11px] font-semibold flex items-center gap-1 whitespace-nowrap transition disabled:opacity-50 sm:py-1.5"
                   >
                     <Zap className="w-3.5 h-3.5" />
                     <span>Verify OCR (All Pages)</span>
                   </button>
                   )}
+                  </div>
                   {SHOW_LOCAL_OCR && tesseractProgress.status && (
                     <span className="flex items-center space-x-1.5 text-[11px]">
                       <RefreshCw className={`w-3 h-3 ${isProcessing ? 'animate-spin text-white' : ''}`} />
@@ -2177,8 +2347,8 @@ const handleConvertPdfToCsv = async () => {
 
             <div className="flex-1 min-w-0 min-h-0 self-stretch bg-slate-950 flex flex-col overflow-hidden">
 
-              <div className="bg-slate-800/90 border-b border-slate-700/80 px-4 py-2.5 flex items-center justify-between">
-                <div className="flex items-center space-x-2">
+              <div className="bg-slate-800/90 border-b border-slate-700/80 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {!isPreviewExpanded && (
                     <button
                       type="button"
@@ -2207,7 +2377,7 @@ const handleConvertPdfToCsv = async () => {
                 </div>
 
                 {SHOW_AUTO_FILL_HEADER && (
-                <div className="flex items-center gap-2 sm:gap-3 text-xs text-slate-400">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs text-slate-400">
                   <label className="flex items-center space-x-1.5 cursor-pointer">
                     <input
                       type="checkbox"
@@ -2273,7 +2443,8 @@ const handleConvertPdfToCsv = async () => {
       </div>
 
       <footer className="border-t border-slate-200 bg-white py-6 text-center text-xs text-slate-500">
-        DWIS TAP · Invoice extractor · Upload, OCR, 34-column ERP, Excel export
+        <img src={dwisLogo} alt="DWIS TAP" className="mx-auto mb-2 h-7 w-auto object-contain" />
+        Invoice extractor · Upload, OCR, 34-column ERP, Excel export
       </footer>
     </div>
   );

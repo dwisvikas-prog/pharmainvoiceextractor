@@ -28,6 +28,34 @@ body {
   z-index: 1;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* Keep form fields at >=16px on small screens so iOS Safari doesn't
+   zoom the page in when a field is focused. */
+@media (max-width: 640px) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Smooth native touch scrolling for the wide ERP table and preview stage. */
+.overflow-auto,
+.overflow-x-auto,
+.overflow-y-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
 .app-shell {
   background: var(--page) !important;
   color: var(--ink);
