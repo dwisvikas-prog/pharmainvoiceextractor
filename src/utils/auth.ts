@@ -36,7 +36,7 @@ export const VERIFY_OCR_PAGE_LIMITS: Record<PlanId, number> = {
 
 export const PLAN_PRICING = {
   basic: {
-    monthly: 354,
+    monthly: 300,
     yearly: 3000,
     description: 'For starter invoice processing'
   },

@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { getAccessToken } from './auth';
+import { apiUrl } from './apiBase';
 
 let razorpayScriptPromise: Promise<void> | null = null;
 
@@ -33,7 +34,7 @@ export async function payForPlan(options: PayForPlanOptions): Promise<PayForPlan
   const accessToken = await getAccessToken();
   if (!accessToken) throw new Error('Please log in again before paying.');
 
-  const orderRes = await fetch('/api/razorpay-create-order', {
+  const orderRes = await fetch(apiUrl('/api/razorpay-create-order'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify({ planId: options.planId, billingCycle: options.billingCycle }),
@@ -59,7 +60,7 @@ export async function payForPlan(options: PayForPlanOptions): Promise<PayForPlan
       theme: { color: '#1e86bb' },
       handler: async (response: any) => {
         try {
-          const verifyRes = await fetch('/api/razorpay-verify-payment', {
+          const verifyRes = await fetch(apiUrl('/api/razorpay-verify-payment'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
             body: JSON.stringify({

@@ -2,12 +2,13 @@
 // never trust the browser's "payment succeeded" callback alone) and only
 // then grants the plan via the service-role apply_paid_plan() function.
 import crypto from 'crypto';
-import { getServiceClient, getCallingUser, PLAN_PRICING_PAISE } from './_utils.js';
+import { getServiceClient, getCallingUser, PLAN_PRICING_PAISE, applyCors } from './_utils.js';
 
 const CYCLE_DAYS = { monthly: 30, yearly: 365 };
 const VALID_PLANS = ['basic', 'pro'];
 
 export default async function handler(req, res) {
+  if (applyCors(req, res)) return;
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;

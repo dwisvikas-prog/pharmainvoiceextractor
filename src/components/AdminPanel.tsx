@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { useState, useEffect } from 'react';
 import { ShieldCheck, Search, User, Users } from 'lucide-react';
+import { apiUrl } from '../utils/apiBase';
 
 const ADMIN_TOKEN_KEY = 'dwis_admin_token';
 
@@ -71,7 +72,7 @@ export default function AdminPanel() {
     setIsLoadingUsers(true);
     setListError('');
     try {
-      const res = await fetch('/api/admin-users', {
+      const res = await fetch(apiUrl('/api/admin-users'), {
         method: 'POST',
         headers: authHeader(),
         body: JSON.stringify({ search: search.trim() || undefined }),
@@ -99,7 +100,7 @@ export default function AdminPanel() {
     setLoginError('');
     setIsLoggingIn(true);
     try {
-      const res = await fetch('/api/admin-login', {
+      const res = await fetch(apiUrl('/api/admin-login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ passcode: passcodeInput }),
@@ -135,7 +136,7 @@ export default function AdminPanel() {
     setPayments([]);
     setIsSearching(true);
     try {
-      const res = await fetch('/api/admin-lookup', {
+      const res = await fetch(apiUrl('/api/admin-lookup'), {
         method: 'POST',
         headers: authHeader(),
         body: JSON.stringify({ email: email.trim() }),
@@ -173,7 +174,7 @@ export default function AdminPanel() {
     setIsGranting(true);
     setGrantMessage('');
     try {
-      const res = await fetch('/api/admin-grant', {
+      const res = await fetch(apiUrl('/api/admin-grant'), {
         method: 'POST',
         headers: authHeader(),
         body: JSON.stringify({ email: foundUser.email, days, plan: grantPlan, amount: grantAmount || undefined, note: grantNote || undefined }),
@@ -187,7 +188,7 @@ export default function AdminPanel() {
       setGrantNote('');
       // Re-fetch so the new cash payment (if any) shows up in the history table below.
       if (grantAmount) {
-        const paymentsRes = await fetch('/api/admin-lookup', {
+        const paymentsRes = await fetch(apiUrl('/api/admin-lookup'), {
           method: 'POST',
           headers: authHeader(),
           body: JSON.stringify({ email: foundUser.email }),
@@ -209,7 +210,7 @@ export default function AdminPanel() {
     setIsExpiring(true);
     setGrantMessage('');
     try {
-      const res = await fetch('/api/admin-expire', {
+      const res = await fetch(apiUrl('/api/admin-expire'), {
         method: 'POST',
         headers: authHeader(),
         body: JSON.stringify({ email: foundUser.email }),
@@ -394,7 +395,7 @@ export default function AdminPanel() {
                     min={0}
                     value={grantAmount}
                     onChange={(e) => setGrantAmount(e.target.value)}
-                    placeholder="e.g. 354"
+                    placeholder="e.g. 300"
                     className="w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
                   />
                 </div>

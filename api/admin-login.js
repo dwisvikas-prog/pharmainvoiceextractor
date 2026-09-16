@@ -1,9 +1,10 @@
 // Admin login for the /#admin panel. Totally separate from Supabase user
 // auth - just checks a shared secret (ADMIN_PASSCODE, server-side env var)
 // and hands back a signed, stateless token the client stores locally.
-import { signAdminToken, getServiceClient, getRequestIp, logAdminLoginAttempt } from './_utils.js';
+import { signAdminToken, getServiceClient, getRequestIp, logAdminLoginAttempt, applyCors } from './_utils.js';
 
 export default async function handler(req, res) {
+  if (applyCors(req, res)) return;
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;

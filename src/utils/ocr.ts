@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { ERP_COLUMNS, HEADER_SYNONYMS, HEADER_KEYWORDS, SHOW_LOCAL_OCR } from './constants';
 import Tesseract from 'tesseract.js';
+import { apiUrl } from './apiBase';
 
 export interface ErpRow {
   [col: string]: string;
@@ -582,7 +583,7 @@ export function parseTesseractTextToStructuredData(
 // Gemini API key(s) server-side. The key must never be read or sent from the
 // browser (see api/gemini-ocr.js).
 async function callGeminiWithRotation(payload: any): Promise<string> {
-  const response = await fetch('/api/gemini-ocr', {
+  const response = await fetch(apiUrl('/api/gemini-ocr'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ payload }),

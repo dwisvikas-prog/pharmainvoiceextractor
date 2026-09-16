@@ -37,6 +37,23 @@ export function verifyAdminToken(req) {
   }
 }
 
+// CORS: lets the frontend call these functions from a different origin than
+// where they're hosted (e.g. a static build on Hostinger calling this Vercel
+// deployment). Restricted to ALLOWED_ORIGIN if set, else allows any origin -
+// safe here since these endpoints authenticate via Authorization header
+// tokens/passcodes, never cookies. Returns true if the request was an OPTIONS
+// preflight (already responded to - caller should return immediately).
+export function applyCors(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', process.env.ALLOWED_ORIGIN || '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return true;
+  }
+  return false;
+}
+
 // Best-effort request IP for the login-attempt audit log. Never throws.
 export function getRequestIp(req) {
   const forwarded = req.headers['x-forwarded-for'];
@@ -60,7 +77,7 @@ export async function logAdminLoginAttempt(supabase, success, ip) {
 // paid) - keep in sync with src/utils/auth.ts PLAN_PRICING. Amount is in
 // paise (Razorpay's smallest currency unit), i.e. rupees * 100.
 export const PLAN_PRICING_PAISE = {
-  basic: { monthly: 354 * 100, yearly: 3000 * 100 },
+  basic: { monthly: 300 * 100, yearly: 3000 * 100 },
   pro: { monthly: 500 * 100, yearly: 5000 * 100 },
 };
 

@@ -4,9 +4,10 @@
 // Development):
 //   RAZORPAY_KEY_ID       (required)
 //   RAZORPAY_KEY_SECRET   (required, server-side only)
-import { getServiceClient, getCallingUser, PLAN_PRICING_PAISE } from './_utils.js';
+import { getServiceClient, getCallingUser, PLAN_PRICING_PAISE, applyCors } from './_utils.js';
 
 export default async function handler(req, res) {
+  if (applyCors(req, res)) return;
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
