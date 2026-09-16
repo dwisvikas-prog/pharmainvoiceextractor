@@ -32,7 +32,7 @@ import { ERP_COLUMNS, SHOW_RAW_PDF_TEXT_TAB, SHOW_LOCAL_OCR, SHOW_AUTO_FETCH_ON_
 import { ErpRow, InvoiceHeader, RawTextLine, normalizeToErpRows, performGeminiOcrOnCanvas, performTesseractOcrOnCanvas, parseTesseractTextToStructuredData, performGeminiVerbatimOcrOnCanvas } from './utils/ocr';
 import { extractAllPagesData, loadPdfDocument, renderPdfPageToCanvas } from './utils/pdfExtraction';
 import UploadMenu from './components/UploadMenu';
-import AccessPaywall from './components/AccessPaywall';
+import AccessPaywall, { PlanCheckoutGrid } from './components/AccessPaywall';
 import MetadataPanel from './components/MetadataPanel';
 import StudioTable from './components/StudioTable';
 import AdminPanel from './components/AdminPanel';
@@ -168,7 +168,7 @@ const tapFaqs = [
   },
   {
     question: 'What happens when trial or OCR pages end?',
-    answer: 'The invoice studio locks. Contact us to continue. After the next plan is active you can extract again. Extra 15 trial days use the Extend trial passcode.'
+    answer: 'The invoice studio locks. Contact us to continue. After the next plan is active you can extract again. Extra 15 days are available as a bonus offer code.'
   }
 ];
 
@@ -1650,7 +1650,7 @@ const handleConvertPdfToCsv = async () => {
                     title="Trial"
                     subtitle={`Free for ${TRIAL_DAYS} days`}
                     price={`₹0 · ${TRIAL_DAYS} days`}
-                    howToGet={`Register on Account. After ${TRIAL_DAYS} days, Contact us. A passcode adds ${TRIAL_DAYS} more days.`}
+                    howToGet={`Register on Account. After ${TRIAL_DAYS} days, Contact us. A bonus offer code adds ${TRIAL_DAYS} more days.`}
                     howToUse="Login → Upload bill → set cutoffs → Verify OCR (current page) → Save → Export Excel."
                     ocrNote="About 40 Verify OCR pages in the trial window."
                     includedCount={TAP_TIER_INCLUDED.basic}
@@ -1789,7 +1789,7 @@ const handleConvertPdfToCsv = async () => {
                   onClick={() => setShowPasscodeModal(true)}
                   className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-100"
                 >
-                  Extend trial
+                  Bonus offer
                 </button>
               )}
               <button
@@ -1812,14 +1812,14 @@ const handleConvertPdfToCsv = async () => {
         {showPasscodeModal && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 p-4">
             <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
-              <h3 className="text-lg font-bold text-slate-900">Extend trial</h3>
-              <p className="mt-1 text-sm text-slate-600">Enter a trial passcode. Paid access is via Contact us until checkout is enabled.</p>
+              <h3 className="text-lg font-bold text-slate-900">Bonus offer</h3>
+              <p className="mt-1 text-sm text-slate-600">Enter a bonus offer code for one-time 15 extra days. Once it ends, pick a plan below to keep full access without interruption.</p>
               <input
                 type="text"
                 value={passcode}
                 onChange={(e) => setPasscode(e.target.value)}
                 className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                placeholder="Passcode"
+                placeholder="Bonus offer code"
               />
               {passcodeMessage && <p className="mt-2 text-sm text-red-600">{passcodeMessage}</p>}
               <div className="mt-4 flex gap-2">
@@ -1960,13 +1960,13 @@ const handleConvertPdfToCsv = async () => {
             Plan: {session.plan} · {getDaysUntilExpiry(session.expiresAt)} day(s) left
           </span>
         </div>
-        {session.plan === 'trial' && (
+        {(session.plan === 'trial' || (SHOW_PAYMENT_CHECKOUT && session.plan !== 'pro')) && (
           <button
             type="button"
             onClick={() => setShowPasscodeModal(true)}
             className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
           >
-            Extend trial
+            Premium/Pro
           </button>
         )}
         {SHOW_RAW_PDF_TEXT_TAB && (
@@ -1999,30 +1999,42 @@ const handleConvertPdfToCsv = async () => {
             <p className="text-sm font-medium text-amber-900">
               Your plan expires in {planDaysLeft} day(s).
             </p>
-            <button type="button" onClick={() => setShowPasscodeModal(true)} className="rounded-full bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-500">Use Passcode</button>
+            <button type="button" onClick={() => setShowPasscodeModal(true)} className="rounded-full bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-500">Bonus offer</button>
           </div>
         </div>
       )}
 
       {showPasscodeModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/55 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
+          <div className="w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl" style={{ maxHeight: '90vh' }}>
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-slate-900">Trial Extension</h3>
+              <h3 className="text-lg font-bold text-slate-900">Premium/Pro</h3>
               <button type="button" onClick={() => setShowPasscodeModal(false)} className="text-slate-500 hover:text-slate-700">✕</button>
             </div>
-            <p className="text-sm text-slate-600">Enter a valid passcode to extend the free trial by 15 days.</p>
+            <p className="text-sm font-bold text-slate-900">Bonus offer</p>
+            <p className="mt-1 text-xs text-slate-600">Enter a bonus offer code for a one-time 15-day bonus. Once it ends, pick Basic or Premium to keep full access without interruption.</p>
             <input
               value={passcode}
               onChange={(e) => setPasscode(e.target.value)}
-              placeholder="Enter passcode"
+              placeholder="Enter bonus offer code"
               className="mt-3 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500"
             />
             {passcodeMessage && <p className="mt-2 text-xs text-blue-700">{passcodeMessage}</p>}
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={() => setShowPasscodeModal(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">Cancel</button>
-              <button type="button" onClick={handlePasscodeSubmit} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">Apply code</button>
+              <button type="button" onClick={handlePasscodeSubmit} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">Redeem bonus</button>
             </div>
+
+            {SHOW_PAYMENT_CHECKOUT && (
+              <div className="mt-5 border-t border-slate-200 pt-4">
+                <p className="text-sm font-bold text-slate-900">Or pick a plan</p>
+                <p className="mt-1 text-xs text-slate-600">Paid access gives you the plan's own days starting today — it does not add to your trial.</p>
+                {(statusMsg.toLowerCase().includes('payment') || statusMsg.toLowerCase().includes('opening')) && (
+                  <p className="mt-2 text-sm font-medium text-blue-700">{statusMsg}</p>
+                )}
+                <PlanCheckoutGrid onActivatePlan={handleActivatePlan} />
+              </div>
+            )}
           </div>
         </div>
       )}

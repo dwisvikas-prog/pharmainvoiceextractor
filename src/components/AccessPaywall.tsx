@@ -19,6 +19,45 @@ function PlanFeatureList({ includedCount }: { includedCount: number }) {
   );
 }
 
+export function PlanCheckoutGrid({ onActivatePlan }: { onActivatePlan: (plan: Exclude<PlanId, 'trial'>, cycle: BillingCycle) => void }) {
+  return (
+    <div className="mt-6 grid gap-3 sm:grid-cols-2">
+      <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <p className="text-xs font-bold uppercase text-[#1e86bb]">Basic · monthly</p>
+        <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.basic.monthly} incl. GST</p>
+        <PlanFeatureList includedCount={TAP_TIER_INCLUDED.basic} />
+        <button type="button" onClick={() => onActivatePlan('basic', 'monthly')} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
+          Pay Basic monthly
+        </button>
+      </div>
+      <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <p className="text-xs font-bold uppercase text-[#1e86bb]">Premium · monthly</p>
+        <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.pro.monthly}</p>
+        <PlanFeatureList includedCount={TAP_TIER_INCLUDED.premium} />
+        <button type="button" onClick={() => onActivatePlan('pro', 'monthly')} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
+          Pay Premium monthly
+        </button>
+      </div>
+      <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <p className="text-xs font-bold uppercase text-[#1e86bb]">Basic · yearly</p>
+        <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.basic.yearly}</p>
+        <PlanFeatureList includedCount={TAP_TIER_INCLUDED.basic} />
+        <button type="button" onClick={() => onActivatePlan('basic', 'yearly')} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
+          Pay Basic yearly
+        </button>
+      </div>
+      <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <p className="text-xs font-bold uppercase text-[#1e86bb]">Premium · yearly</p>
+        <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.pro.yearly}</p>
+        <PlanFeatureList includedCount={TAP_TIER_INCLUDED.premium} />
+        <button type="button" onClick={() => onActivatePlan('pro', 'yearly')} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
+          Pay Premium yearly
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const CONTACT = { tel: '9988336023', href: 'tel:9988336023' };
 
 interface AccessPaywallProps {
@@ -66,22 +105,22 @@ export default function AccessPaywall({ session, reason, onLogout, onActivatePla
           Logged in as <span className="font-semibold">{session.user.name}</span> ({session.user.email}). Current plan: {session.plan}.
         </p>
         <p className="mt-3 text-sm text-slate-600">
-          How to continue: Contact us. After payment is confirmed you get access for the next {session.billingCycle === 'yearly' ? 'year' : 'month'} (trial extra: passcode for {TRIAL_DAYS} days).
+          How to continue: Contact us. After payment is confirmed you get access for the next {session.billingCycle === 'yearly' ? 'year' : 'month'} (bonus offer: a code for {TRIAL_DAYS} extra days).
         </p>
 
         <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
           <p className="flex items-center gap-2 text-sm font-bold text-slate-900">
             <Ticket className="h-4 w-4 text-blue-600" />
-            Have a passcode?
+            Have a bonus offer code?
           </p>
-          <p className="mt-1 text-xs text-slate-600">Enter it below to add more trial days to this account instantly.</p>
+          <p className="mt-1 text-xs text-slate-600">This is a one-time bonus, not a plan — pick Basic or Premium below to keep full access without interruption.</p>
           <div className="mt-3 flex flex-col gap-2 sm:flex-row">
             <input
               type="text"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleApply(); }}
-              placeholder="Enter passcode"
+              placeholder="Enter bonus offer code"
               className="w-full flex-1 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
             />
             <button
@@ -90,7 +129,7 @@ export default function AccessPaywall({ session, reason, onLogout, onActivatePla
               disabled={isSubmitting || !code.trim()}
               className="shrink-0 rounded-full bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-cta transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isSubmitting ? 'Applying…' : 'Apply passcode'}
+              {isSubmitting ? 'Applying…' : 'Redeem bonus'}
             </button>
           </div>
           {message && (
@@ -98,42 +137,7 @@ export default function AccessPaywall({ session, reason, onLogout, onActivatePla
           )}
         </div>
 
-        {SHOW_PAYMENT_CHECKOUT && (
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-bold uppercase text-[#1e86bb]">Basic · monthly</p>
-              <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.basic.monthly} incl. GST</p>
-              <PlanFeatureList includedCount={TAP_TIER_INCLUDED.basic} />
-              <button type="button" onClick={() => onActivatePlan('basic', 'monthly')} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
-                Pay Basic monthly
-              </button>
-            </div>
-            <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-bold uppercase text-[#1e86bb]">Premium · monthly</p>
-              <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.pro.monthly}</p>
-              <PlanFeatureList includedCount={TAP_TIER_INCLUDED.premium} />
-              <button type="button" onClick={() => onActivatePlan('pro', 'monthly')} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
-                Pay Premium monthly
-              </button>
-            </div>
-            <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-bold uppercase text-[#1e86bb]">Basic · yearly</p>
-              <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.basic.yearly}</p>
-              <PlanFeatureList includedCount={TAP_TIER_INCLUDED.basic} />
-              <button type="button" onClick={() => onActivatePlan('basic', 'yearly')} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
-                Pay Basic yearly
-              </button>
-            </div>
-            <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-bold uppercase text-[#1e86bb]">Premium · yearly</p>
-              <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.pro.yearly}</p>
-              <PlanFeatureList includedCount={TAP_TIER_INCLUDED.premium} />
-              <button type="button" onClick={() => onActivatePlan('pro', 'yearly')} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
-                Pay Premium yearly
-              </button>
-            </div>
-          </div>
-        )}
+        {SHOW_PAYMENT_CHECKOUT && <PlanCheckoutGrid onActivatePlan={onActivatePlan} />}
 
         <div className="mt-6 flex flex-wrap gap-3">
           <a href={CONTACT.href} className="inline-flex rounded-full bg-[#1e86bb] px-5 py-2.5 text-sm font-semibold text-white no-underline hover:bg-[#1970a0]">
