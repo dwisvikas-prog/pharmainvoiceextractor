@@ -37,7 +37,7 @@ import MetadataPanel from './components/MetadataPanel';
 import StudioTable from './components/StudioTable';
 import AdminPanel from './components/AdminPanel';
 import { payForPlan } from './utils/payments';
-import { getStoredSession, getDaysUntilExpiry, isExpiryWarningWindow, loginUser, logoutSession, registerUser, redeemPasscode, resendConfirmationEmail, sendPasswordResetEmail, resetPasswordWithRecoverySession, supabase, TRIAL_DAYS, PLAN_PRICING, getAccessBlockReason, getVerifyOcrLimit, recordVerifyOcrPages, isSessionStillActive, SessionInvalidatedError, type AuthSession, type PlanId, type BillingCycle } from './utils/auth';
+import { getStoredSession, getDaysUntilExpiry, isExpiryWarningWindow, loginUser, logoutSession, registerUser, redeemPasscode, resendConfirmationEmail, sendPasswordResetEmail, resetPasswordWithRecoveryToken, TRIAL_DAYS, PLAN_PRICING, getAccessBlockReason, getVerifyOcrLimit, recordVerifyOcrPages, isSessionStillActive, SessionInvalidatedError, type AuthSession, type PlanId, type BillingCycle } from './utils/auth';
 import dwisLogo from './assets/dwis-logo.png';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -276,6 +276,7 @@ export default function App() {
   const [authSuccess, setAuthSuccess] = useState('');
   const [sessionKickedOutMessage, setSessionKickedOutMessage] = useState('');
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
+  const [recoveryTokenHash, setRecoveryTokenHash] = useState('');
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotStatus, setForgotStatus] = useState('');
   const [isSendingReset, setIsSendingReset] = useState(false);
@@ -360,20 +361,25 @@ export default function App() {
   }, []);
 
   // Fires when the user lands here from the "reset your password" email
-  // link - Supabase parses the recovery token out of the URL itself and
-  // emits this event. Show the "set new password" form instead of the
-  // normal login/register panel while this is active.
+  // link. We read the token_hash straight out of the URL instead of
+  // calling supabase.auth.verifyOtp immediately - doing that on page load
+  // is what let email security scanners (Gmail/Outlook link prefetching)
+  // silently consume the one-time token before the user actually clicked,
+  // which showed up as "invalid or expired" links. The token is only ever
+  // verified later, inside handleResetPasswordSubmit, i.e. on a real click.
   useEffect(() => {
-    const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') {
-        setIsPasswordRecovery(true);
-        setShowForgotPassword(false);
-        window.requestAnimationFrame(() => {
-          document.getElementById('auth')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        });
-      }
-    });
-    return () => subscription.subscription.unsubscribe();
+    const params = new URLSearchParams(window.location.search);
+    const tokenHash = params.get('token_hash');
+    const type = params.get('type');
+    if (tokenHash && type === 'recovery') {
+      setRecoveryTokenHash(tokenHash);
+      setIsPasswordRecovery(true);
+      setShowForgotPassword(false);
+      window.history.replaceState(null, '', window.location.pathname || '/');
+      window.requestAnimationFrame(() => {
+        document.getElementById('auth')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
   }, []);
 
   // Single-active-session enforcement: if another device logs into this
@@ -468,11 +474,16 @@ export default function App() {
       setResetPasswordError('Passwords do not match.');
       return;
     }
+    if (!recoveryTokenHash) {
+      setResetPasswordError('This reset link is invalid or has expired. Please request a new one.');
+      return;
+    }
 
     try {
-      await resetPasswordWithRecoverySession(newPassword);
+      await resetPasswordWithRecoveryToken(recoveryTokenHash, newPassword);
       setSession(null);
       setIsPasswordRecovery(false);
+      setRecoveryTokenHash('');
       setNewPassword('');
       setConfirmNewPassword('');
       setAuthMode('login');

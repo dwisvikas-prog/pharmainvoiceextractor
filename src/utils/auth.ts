@@ -276,13 +276,18 @@ export const sendPasswordResetEmail = async (email: string): Promise<void> => {
   if (error) throw new Error(error.message);
 };
 
-// Call once a PASSWORD_RECOVERY session is active (user clicked the email
-// link). Sets the new password, then signs out everywhere - this device
-// included - and frees this account's single-session lock, so the old
-// login is fully invalidated and the user starts clean with the new
-// password on their next login.
-export const resetPasswordWithRecoverySession = async (newPassword: string): Promise<void> => {
+// Verifies the recovery token_hash from the reset email link and sets the
+// new password in one step. We deliberately do NOT call verifyOtp as soon
+// as the link is opened (on page load) - that is what lets email security
+// scanners (Gmail/Outlook link prefetching) silently consume the one-time
+// token before the user ever clicks, which is why links were showing
+// "invalid or expired". Verifying only here, inside the user's own submit
+// action, means it only ever runs on a real click.
+export const resetPasswordWithRecoveryToken = async (tokenHash: string, newPassword: string): Promise<void> => {
   if (!newPassword.trim()) throw new Error('Please enter a new password.');
+
+  const { error: verifyError } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' });
+  if (verifyError) throw new Error(verifyError.message || 'This reset link is invalid or has expired. Please request a new one.');
 
   const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
   if (updateError) throw new Error(updateError.message);
