@@ -267,6 +267,36 @@ export const resendConfirmationEmail = async (email: string): Promise<void> => {
   if (error) throw new Error(error.message);
 };
 
+// Sends the "reset your password" email. Supabase redirects the user back
+// to redirectTo with a recovery token in the URL hash; App.tsx listens for
+// the PASSWORD_RECOVERY auth event to show the "set new password" form.
+export const sendPasswordResetEmail = async (email: string): Promise<void> => {
+  const redirectTo = `${window.location.origin}${window.location.pathname}`;
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo });
+  if (error) throw new Error(error.message);
+};
+
+// Call once a PASSWORD_RECOVERY session is active (user clicked the email
+// link). Sets the new password, then signs out everywhere - this device
+// included - and frees this account's single-session lock, so the old
+// login is fully invalidated and the user starts clean with the new
+// password on their next login.
+export const resetPasswordWithRecoverySession = async (newPassword: string): Promise<void> => {
+  if (!newPassword.trim()) throw new Error('Please enter a new password.');
+
+  const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+  if (updateError) throw new Error(updateError.message);
+
+  try {
+    await supabase.rpc('force_release_session');
+  } catch {
+    // best-effort - the 60s heartbeat timeout frees the slot regardless
+  }
+
+  clearLocalSessionToken();
+  await supabase.auth.signOut({ scope: 'global' });
+};
+
 export const logoutSession = async (session?: AuthSession | null) => {
   if (session?.sessionToken) {
     try {

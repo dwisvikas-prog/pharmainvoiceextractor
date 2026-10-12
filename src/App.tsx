@@ -37,7 +37,7 @@ import MetadataPanel from './components/MetadataPanel';
 import StudioTable from './components/StudioTable';
 import AdminPanel from './components/AdminPanel';
 import { payForPlan } from './utils/payments';
-import { getStoredSession, getDaysUntilExpiry, isExpiryWarningWindow, loginUser, logoutSession, registerUser, redeemPasscode, resendConfirmationEmail, TRIAL_DAYS, PLAN_PRICING, getAccessBlockReason, getVerifyOcrLimit, recordVerifyOcrPages, isSessionStillActive, SessionInvalidatedError, type AuthSession, type PlanId, type BillingCycle } from './utils/auth';
+import { getStoredSession, getDaysUntilExpiry, isExpiryWarningWindow, loginUser, logoutSession, registerUser, redeemPasscode, resendConfirmationEmail, sendPasswordResetEmail, resetPasswordWithRecoverySession, supabase, TRIAL_DAYS, PLAN_PRICING, getAccessBlockReason, getVerifyOcrLimit, recordVerifyOcrPages, isSessionStillActive, SessionInvalidatedError, type AuthSession, type PlanId, type BillingCycle } from './utils/auth';
 import dwisLogo from './assets/dwis-logo.png';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -275,6 +275,15 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [authSuccess, setAuthSuccess] = useState('');
   const [sessionKickedOutMessage, setSessionKickedOutMessage] = useState('');
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotStatus, setForgotStatus] = useState('');
+  const [isSendingReset, setIsSendingReset] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [resetPasswordError, setResetPasswordError] = useState('');
+  const [resetPasswordSuccess, setResetPasswordSuccess] = useState('');
   const [session, setSession] = useState<AuthSession | null>(null);
   const [passcode, setPasscode] = useState('');
   const [passcodeMessage, setPasscodeMessage] = useState('');
@@ -350,6 +359,23 @@ export default function App() {
     };
   }, []);
 
+  // Fires when the user lands here from the "reset your password" email
+  // link - Supabase parses the recovery token out of the URL itself and
+  // emits this event. Show the "set new password" form instead of the
+  // normal login/register panel while this is active.
+  useEffect(() => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsPasswordRecovery(true);
+        setShowForgotPassword(false);
+        window.requestAnimationFrame(() => {
+          document.getElementById('auth')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+      }
+    });
+    return () => subscription.subscription.unsubscribe();
+  }, []);
+
   // Single-active-session enforcement: if another device logs into this
   // account, our claimed session token stops matching the database's
   // current one. Poll for that regularly and on tab focus, and kick this
@@ -416,6 +442,46 @@ export default function App() {
         return;
       }
       setAuthError(message);
+    }
+  };
+
+  const handleForgotPasswordSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setForgotStatus('');
+    setIsSendingReset(true);
+    try {
+      await sendPasswordResetEmail(forgotEmail);
+      setForgotStatus('If an account exists for that email, a reset link has been sent. Check your inbox (and spam folder).');
+    } catch (error: any) {
+      setForgotStatus(error?.message || 'Could not send reset email. Try again shortly.');
+    } finally {
+      setIsSendingReset(false);
+    }
+  };
+
+  const handleResetPasswordSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setResetPasswordError('');
+    setResetPasswordSuccess('');
+
+    if (newPassword !== confirmNewPassword) {
+      setResetPasswordError('Passwords do not match.');
+      return;
+    }
+
+    try {
+      await resetPasswordWithRecoverySession(newPassword);
+      setSession(null);
+      setIsPasswordRecovery(false);
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setAuthMode('login');
+      setAuthSuccess('Password updated. Please log in with your new password.');
+      if (typeof window !== 'undefined' && window.location.hash) {
+        window.history.replaceState(null, '', window.location.pathname || '/');
+      }
+    } catch (error: any) {
+      setResetPasswordError(error?.message || 'Could not update password.');
     }
   };
 
@@ -1487,6 +1553,79 @@ const handleConvertPdfToCsv = async () => {
                       <p className="mt-2 text-[11px] text-slate-400">For security, you can resend again in {resendCooldown}s.</p>
                     )}
                   </div>
+                ) : isPasswordRecovery ? (
+                  <>
+                    <h2 className="text-xl font-black tracking-tight text-slate-900">Set a new password</h2>
+                    <p className="mt-2 text-sm text-slate-600">
+                      Choose a new password for your account. You'll be signed out everywhere, including this device, and will need to log in again with it.
+                    </p>
+                    <form onSubmit={handleResetPasswordSubmit} className="mt-4 space-y-3">
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-600">New Password</label>
+                        <input
+                          type="password"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          className="w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+                          placeholder="••••••••"
+                          required
+                          minLength={6}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-600">Confirm New Password</label>
+                        <input
+                          type="password"
+                          value={confirmNewPassword}
+                          onChange={(e) => setConfirmNewPassword(e.target.value)}
+                          className="w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+                          placeholder="••••••••"
+                          required
+                          minLength={6}
+                        />
+                      </div>
+                      {resetPasswordError && <p className="text-xs text-red-600">{resetPasswordError}</p>}
+                      {resetPasswordSuccess && <p className="text-xs text-emerald-600">{resetPasswordSuccess}</p>}
+                      <button type="submit" className="w-full rounded-full bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-cta transition hover:bg-blue-700">
+                        Update Password
+                      </button>
+                    </form>
+                  </>
+                ) : showForgotPassword ? (
+                  <>
+                    <h2 className="text-xl font-black tracking-tight text-slate-900">Reset your password</h2>
+                    <p className="mt-2 text-sm text-slate-600">Enter your account email and we'll send you a link to set a new password.</p>
+                    <form onSubmit={handleForgotPasswordSubmit} className="mt-4 space-y-3">
+                      <div>
+                        <label className="mb-1 block text-[11px] font-medium text-slate-600">Email</label>
+                        <input
+                          type="email"
+                          value={forgotEmail}
+                          onChange={(e) => setForgotEmail(e.target.value)}
+                          className="w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+                          placeholder="you@example.com"
+                          required
+                        />
+                      </div>
+                      {forgotStatus && <p className="text-xs text-slate-600">{forgotStatus}</p>}
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => { setShowForgotPassword(false); setForgotStatus(''); }}
+                          className="flex-1 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                        >
+                          Back to Login
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isSendingReset}
+                          className="flex-1 rounded-full bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-cta transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isSendingReset ? 'Sending…' : 'Send Reset Link'}
+                        </button>
+                      </div>
+                    </form>
+                  </>
                 ) : (
                   <>
                     <div className="mb-4 flex items-center gap-2">
@@ -1542,6 +1681,15 @@ const handleConvertPdfToCsv = async () => {
                           placeholder="••••••••"
                           required
                         />
+                        {authMode === 'login' && (
+                          <button
+                            type="button"
+                            onClick={() => { setShowForgotPassword(true); setForgotEmail(authEmail); setForgotStatus(''); }}
+                            className="mt-1.5 text-[11px] font-semibold text-blue-600 hover:underline"
+                          >
+                            Forgot password?
+                          </button>
+                        )}
                       </div>
                       {authError && <p className="text-xs text-red-600">{authError}</p>}
                       {authSuccess && <p className="text-xs text-emerald-600">{authSuccess}</p>}
