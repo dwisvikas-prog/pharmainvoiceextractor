@@ -1985,6 +1985,14 @@ const handleConvertPdfToCsv = async () => {
                 <button type="button" onClick={handlePasscodeSubmit} className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Apply</button>
                 <button type="button" onClick={() => setShowPasscodeModal(false)} className="rounded-full border border-slate-200 px-4 py-2 text-sm">Cancel</button>
               </div>
+
+              {SHOW_PAYMENT_CHECKOUT && (
+                <div className="mt-5 border-t border-slate-200 pt-4">
+                  <p className="text-sm font-bold text-slate-900">Or pick a plan</p>
+                  <p className="mt-1 text-xs text-slate-600">Paid access gives you the plan's own days starting today — it does not add to your trial.</p>
+                  <PlanCheckoutGrid onActivatePlan={handleActivatePlan} />
+                </div>
+              )}
             </div>
           </div>
         )}
