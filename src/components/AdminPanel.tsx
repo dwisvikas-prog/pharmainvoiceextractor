@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { useState, useEffect } from 'react';
-import { ShieldCheck, Search, User, Users, Ticket } from 'lucide-react';
+import { ShieldCheck, Search, User, Users, Ticket, Menu, X as CloseIcon, CreditCard } from 'lucide-react';
 import { apiUrl } from '../utils/apiBase';
 import { DAILY_OCR_PAGE_LIMITS, type PlanId } from '../utils/auth';
 
@@ -79,10 +79,21 @@ interface DiscountCoupon {
   times_redeemed: number;
 }
 
+type AdminTab = 'users' | 'payments' | 'coupons' | 'find';
+
+const NAV_ITEMS: { key: AdminTab; label: string; icon: typeof Users }[] = [
+  { key: 'users', label: 'Registered users', icon: Users },
+  { key: 'payments', label: 'All payments', icon: CreditCard },
+  { key: 'coupons', label: 'Discount coupons', icon: Ticket },
+  { key: 'find', label: 'Find a user', icon: Search },
+];
+
 export default function AdminPanel() {
   const [token, setToken] = useState<string | null>(() => {
     try { return localStorage.getItem(ADMIN_TOKEN_KEY); } catch { return null; }
   });
+  const [activeTab, setActiveTab] = useState<AdminTab>('users');
+  const [menuOpen, setMenuOpen] = useState(false);
   const [passcodeInput, setPasscodeInput] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -320,6 +331,8 @@ export default function AdminPanel() {
   const handleSelectFromList = (email: string) => {
     setSearchEmail(email);
     loadUserDetail(email);
+    setActiveTab('find');
+    setMenuOpen(false);
   };
 
   const handleGrant = async () => {
@@ -417,15 +430,71 @@ export default function AdminPanel() {
     <div className="min-h-screen bg-[#f8fafc] px-4 py-10">
       <div className="mx-auto max-w-4xl">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-blue-700">
-            <ShieldCheck className="h-5 w-5" />
-            <p className="text-xs font-bold uppercase tracking-[0.16em]">DWIS TAP Admin</p>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
+              className="rounded-full border border-slate-200 bg-white p-2 text-slate-700 hover:bg-slate-50"
+              aria-label="Menu"
+            >
+              {menuOpen ? <CloseIcon className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+            </button>
+            <div className="flex items-center gap-2 text-blue-700">
+              <ShieldCheck className="h-5 w-5" />
+              <p className="text-xs font-bold uppercase tracking-[0.16em]">DWIS TAP Admin</p>
+            </div>
           </div>
           <button type="button" onClick={handleLogout} className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
             Logout
           </button>
         </div>
 
+        <div className="relative">
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} />
+              <div className="absolute left-0 top-2 z-30 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                {NAV_ITEMS.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => { setActiveTab(item.key); setMenuOpen(false); }}
+                      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium ${
+                        activeTab === item.key ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="mt-3 hidden gap-2 sm:flex">
+          {NAV_ITEMS.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setActiveTab(item.key)}
+                className={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold ${
+                  activeTab === item.key ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {activeTab === 'users' && (
         <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -478,7 +547,9 @@ export default function AdminPanel() {
             </table>
           </div>
         </div>
+        )}
 
+        {activeTab === 'payments' && (
         <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-lg font-bold text-slate-900">All payments</h2>
@@ -540,7 +611,9 @@ export default function AdminPanel() {
             </table>
           </div>
         </div>
+        )}
 
+        {activeTab === 'find' && (
         <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
           <h2 className="text-lg font-bold text-slate-900">Find a user</h2>
           <form onSubmit={handleSearch} className="mt-3 flex flex-col gap-2 sm:flex-row">
@@ -559,7 +632,9 @@ export default function AdminPanel() {
           </form>
           {lookupError && <p className="mt-2 text-xs text-red-600">{lookupError}</p>}
         </div>
+        )}
 
+        {activeTab === 'coupons' && (
         <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
           <div className="flex items-center gap-2">
             <Ticket className="h-4 w-4 text-blue-600" />
@@ -654,8 +729,9 @@ export default function AdminPanel() {
             </table>
           </div>
         </div>
+        )}
 
-        {foundUser && (
+        {activeTab === 'find' && foundUser && (
           <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
             <div className="flex items-center gap-2">
               <User className="h-4 w-4 text-blue-600" />
