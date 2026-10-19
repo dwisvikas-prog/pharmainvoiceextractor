@@ -1811,7 +1811,7 @@ const handleConvertPdfToCsv = async () => {
                     price={`₹0 · ${TRIAL_DAYS} days`}
                     howToGet={`Register on Account. After ${TRIAL_DAYS} days, Contact us. A bonus offer code adds ${TRIAL_DAYS} more days.`}
                     howToUse="Login → Upload bill → set cutoffs → Verify OCR (current page) → Save → Export Excel."
-                    ocrNote="About 40 Verify OCR pages in the trial window."
+                    ocrNote="About 40 Verify OCR pages in the trial window (max 10/day, no rollover)."
                     includedCount={TAP_TIER_INCLUDED.basic}
                   />
                 )}
@@ -1824,7 +1824,7 @@ const handleConvertPdfToCsv = async () => {
                       price={`₹${PLAN_PRICING.basic.monthly.toLocaleString('en-IN')} / month`}
                       howToGet="Contact us after trial. We activate Basic for 30 days."
                       howToUse="Same studio. Verify OCR on the page you are viewing."
-                      ocrNote="About 100 Verify OCR pages / month. Limit end → studio locks until next plan."
+                      ocrNote="About 100 Verify OCR pages / month (max 20/day, no rollover). Limit end → studio locks until next plan."
                       includedCount={TAP_TIER_INCLUDED.basic}
                     />
                     <TapPricingCard
@@ -1834,7 +1834,7 @@ const handleConvertPdfToCsv = async () => {
                       price={`₹${PLAN_PRICING.pro.monthly.toLocaleString('en-IN')} / month`}
                       howToGet="Contact us. We activate Premium for 30 days."
                       howToUse="Same studio plus Verify OCR on all pages of a multi-page PDF."
-                      ocrNote="About 180 Verify OCR pages / month. Limit end → studio locks until next plan."
+                      ocrNote="About 180 Verify OCR pages / month (max 50/day, no rollover). Limit end → studio locks until next plan."
                       includedCount={TAP_TIER_INCLUDED.premium}
                     />
                   </>
@@ -1848,7 +1848,7 @@ const handleConvertPdfToCsv = async () => {
                       price={`₹${PLAN_PRICING.basic.yearly.toLocaleString('en-IN')} / year`}
                       howToGet="Contact us. We activate Basic for 12 months."
                       howToUse="Same as Monthly Basic, billed yearly."
-                      ocrNote="About 100 Verify OCR pages / month for 12 months."
+                      ocrNote="About 100 Verify OCR pages / month for 12 months (max 20/day, no rollover)."
                       includedCount={TAP_TIER_INCLUDED.basic}
                     />
                     <TapPricingCard
@@ -1858,7 +1858,7 @@ const handleConvertPdfToCsv = async () => {
                       price={`₹${PLAN_PRICING.pro.yearly.toLocaleString('en-IN')} / year`}
                       howToGet="Contact us. We activate Premium for 12 months."
                       howToUse="Same as Monthly Premium, billed yearly."
-                      ocrNote="About 180 Verify OCR pages / month for 12 months."
+                      ocrNote="About 180 Verify OCR pages / month for 12 months (max 50/day, no rollover)."
                       includedCount={TAP_TIER_INCLUDED.premium}
                     />
                   </>
