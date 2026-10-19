@@ -553,11 +553,11 @@ export default function App() {
     }
   };
 
-  const handleActivatePlan = async (plan: Exclude<PlanId, 'trial'>, cycle: BillingCycle) => {
+  const handleActivatePlan = async (plan: Exclude<PlanId, 'trial'>, cycle: BillingCycle, couponCode?: string) => {
     if (!session) return;
     setStatusMsg('Opening payment…');
     try {
-      const result = await payForPlan({ planId: plan, billingCycle: cycle, name: session.user.name, email: session.user.email });
+      const result = await payForPlan({ planId: plan, billingCycle: cycle, name: session.user.name, email: session.user.email, couponCode });
       setSession((prev) => prev ? { ...prev, plan: result.plan as PlanId, billingCycle: result.billingCycle as BillingCycle, expiresAt: result.expiresAt } : prev);
       setStatusMsg(`Payment successful. ${plan === 'pro' ? 'Premium' : 'Basic'} plan is now active.`);
       setTimeout(() => window.location.reload(), 1200);

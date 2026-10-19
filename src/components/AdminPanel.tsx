@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { useState, useEffect } from 'react';
-import { ShieldCheck, Search, User, Users } from 'lucide-react';
+import { ShieldCheck, Search, User, Users, Ticket } from 'lucide-react';
 import { apiUrl } from '../utils/apiBase';
 import { DAILY_OCR_PAGE_LIMITS, type PlanId } from '../utils/auth';
 
@@ -47,6 +47,15 @@ const SOURCE_LABEL: Record<string, string> = {
   coupon: 'Coupon',
 };
 
+interface DiscountCoupon {
+  code: string;
+  discount_percent: number;
+  active: boolean;
+  expires_at: string | null;
+  created_at: string;
+  times_redeemed: number;
+}
+
 export default function AdminPanel() {
   const [token, setToken] = useState<string | null>(() => {
     try { return localStorage.getItem(ADMIN_TOKEN_KEY); } catch { return null; }
@@ -74,7 +83,92 @@ export default function AdminPanel() {
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [listError, setListError] = useState('');
 
+  const [coupons, setCoupons] = useState<DiscountCoupon[]>([]);
+  const [isLoadingCoupons, setIsLoadingCoupons] = useState(false);
+  const [couponError, setCouponError] = useState('');
+  const [newCouponCode, setNewCouponCode] = useState('');
+  const [newCouponPercent, setNewCouponPercent] = useState('10');
+  const [newCouponExpiry, setNewCouponExpiry] = useState('');
+  const [isCreatingCoupon, setIsCreatingCoupon] = useState(false);
+
   const authHeader = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token}` });
+
+  const fetchCoupons = async () => {
+    if (!token) return;
+    setIsLoadingCoupons(true);
+    setCouponError('');
+    try {
+      const res = await fetch(apiUrl('/api/admin-coupons'), {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({ action: 'list' }),
+      });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load coupons.');
+      setCoupons(data.coupons || []);
+    } catch (error: any) {
+      setCouponError(error?.message || 'Could not load coupons.');
+    } finally {
+      setIsLoadingCoupons(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!token) return;
+    fetchCoupons();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const handleCreateCoupon = async () => {
+    const percent = Number(newCouponPercent);
+    if (!newCouponCode.trim() || !Number.isFinite(percent) || percent < 1 || percent > 100) {
+      setCouponError('Enter a code and a discount percent between 1 and 100.');
+      return;
+    }
+    setIsCreatingCoupon(true);
+    setCouponError('');
+    try {
+      const res = await fetch(apiUrl('/api/admin-coupons'), {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({
+          action: 'create',
+          code: newCouponCode.trim(),
+          discountPercent: percent,
+          expiresAt: newCouponExpiry ? new Date(newCouponExpiry).toISOString() : null,
+        }),
+      });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not create coupon.');
+      setNewCouponCode('');
+      setNewCouponPercent('10');
+      setNewCouponExpiry('');
+      fetchCoupons();
+    } catch (error: any) {
+      setCouponError(error?.message || 'Could not create coupon.');
+    } finally {
+      setIsCreatingCoupon(false);
+    }
+  };
+
+  const handleToggleCoupon = async (code: string, active: boolean) => {
+    setCouponError('');
+    try {
+      const res = await fetch(apiUrl('/api/admin-coupons'), {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({ action: 'toggle', code, active }),
+      });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not update coupon.');
+      fetchCoupons();
+    } catch (error: any) {
+      setCouponError(error?.message || 'Could not update coupon.');
+    }
+  };
 
   const fetchUsers = async (search: string) => {
     if (!token) return;
@@ -347,6 +441,92 @@ export default function AdminPanel() {
             </button>
           </form>
           {lookupError && <p className="mt-2 text-xs text-red-600">{lookupError}</p>}
+        </div>
+
+        <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+          <div className="flex items-center gap-2">
+            <Ticket className="h-4 w-4 text-blue-600" />
+            <h2 className="text-lg font-bold text-slate-900">Discount coupons</h2>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Percent-off codes for the checkout screen - separate from the trial-extend bonus codes. Each account can use a given coupon only once.
+          </p>
+
+          <div className="mt-3 grid gap-2 sm:grid-cols-4">
+            <input
+              type="text"
+              value={newCouponCode}
+              onChange={(e) => setNewCouponCode(e.target.value)}
+              placeholder="CODE"
+              className="rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+            />
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={newCouponPercent}
+              onChange={(e) => setNewCouponPercent(e.target.value)}
+              placeholder="% off"
+              className="rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+            />
+            <input
+              type="date"
+              value={newCouponExpiry}
+              onChange={(e) => setNewCouponExpiry(e.target.value)}
+              className="rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+            />
+            <button
+              type="button"
+              onClick={handleCreateCoupon}
+              disabled={isCreatingCoupon}
+              className="rounded-full bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-cta transition hover:bg-blue-700 disabled:opacity-50"
+            >
+              {isCreatingCoupon ? 'Saving…' : 'Create / update'}
+            </button>
+          </div>
+          {couponError && <p className="mt-2 text-xs text-red-600">{couponError}</p>}
+
+          <div className="mt-3 max-h-72 overflow-y-auto overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0 bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">Code</th>
+                  <th className="px-3 py-2 font-semibold">% off</th>
+                  <th className="px-3 py-2 font-semibold">Used</th>
+                  <th className="px-3 py-2 font-semibold">Expires</th>
+                  <th className="px-3 py-2 font-semibold">Status</th>
+                  <th className="px-3 py-2 font-semibold"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {coupons.length === 0 && !isLoadingCoupons && (
+                  <tr><td colSpan={6} className="px-3 py-4 text-center text-slate-400">No coupons yet.</td></tr>
+                )}
+                {coupons.map((c) => (
+                  <tr key={c.code}>
+                    <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-800">{c.code}</td>
+                    <td className="px-3 py-2 text-slate-700">{c.discount_percent}%</td>
+                    <td className="px-3 py-2 text-slate-700">{c.times_redeemed}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-slate-700">{c.expires_at ? new Date(c.expires_at).toLocaleDateString('en-IN') : '—'}</td>
+                    <td className="px-3 py-2">
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${c.active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                        {c.active ? 'Active' : 'Disabled'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleCoupon(c.code, !c.active)}
+                        className="rounded-full border border-slate-200 px-3 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        {c.active ? 'Disable' : 'Enable'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {foundUser && (

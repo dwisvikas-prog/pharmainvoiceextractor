@@ -19,40 +19,54 @@ function PlanFeatureList({ includedCount }: { includedCount: number }) {
   );
 }
 
-export function PlanCheckoutGrid({ onActivatePlan }: { onActivatePlan: (plan: Exclude<PlanId, 'trial'>, cycle: BillingCycle) => void }) {
+export function PlanCheckoutGrid({ onActivatePlan }: { onActivatePlan: (plan: Exclude<PlanId, 'trial'>, cycle: BillingCycle, couponCode?: string) => void }) {
+  const [couponCode, setCouponCode] = useState('');
+
   return (
-    <div className="mt-6 grid gap-3 sm:grid-cols-2">
-      <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <p className="text-xs font-bold uppercase text-[#1e86bb]">Basic · monthly</p>
-        <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.basic.monthly} incl. GST</p>
-        <PlanFeatureList includedCount={TAP_TIER_INCLUDED.basic} />
-        <button type="button" onClick={() => onActivatePlan('basic', 'monthly')} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
-          Pay Basic monthly
-        </button>
+    <div className="mt-6">
+      <div>
+        <label className="mb-1 block text-[11px] font-medium text-slate-600">Have a discount coupon?</label>
+        <input
+          type="text"
+          value={couponCode}
+          onChange={(e) => setCouponCode(e.target.value)}
+          placeholder="Enter coupon code (optional)"
+          className="w-full max-w-xs rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-900 outline-none focus:border-blue-500"
+        />
       </div>
-      <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <p className="text-xs font-bold uppercase text-[#1e86bb]">Premium · monthly</p>
-        <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.pro.monthly}</p>
-        <PlanFeatureList includedCount={TAP_TIER_INCLUDED.premium} />
-        <button type="button" onClick={() => onActivatePlan('pro', 'monthly')} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
-          Pay Premium monthly
-        </button>
-      </div>
-      <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <p className="text-xs font-bold uppercase text-[#1e86bb]">Basic · yearly</p>
-        <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.basic.yearly}</p>
-        <PlanFeatureList includedCount={TAP_TIER_INCLUDED.basic} />
-        <button type="button" onClick={() => onActivatePlan('basic', 'yearly')} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
-          Pay Basic yearly
-        </button>
-      </div>
-      <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <p className="text-xs font-bold uppercase text-[#1e86bb]">Premium · yearly</p>
-        <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.pro.yearly}</p>
-        <PlanFeatureList includedCount={TAP_TIER_INCLUDED.premium} />
-        <button type="button" onClick={() => onActivatePlan('pro', 'yearly')} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
-          Pay Premium yearly
-        </button>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs font-bold uppercase text-[#1e86bb]">Basic · monthly</p>
+          <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.basic.monthly} incl. GST</p>
+          <PlanFeatureList includedCount={TAP_TIER_INCLUDED.basic} />
+          <button type="button" onClick={() => onActivatePlan('basic', 'monthly', couponCode)} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
+            Pay Basic monthly
+          </button>
+        </div>
+        <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs font-bold uppercase text-[#1e86bb]">Premium · monthly</p>
+          <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.pro.monthly}</p>
+          <PlanFeatureList includedCount={TAP_TIER_INCLUDED.premium} />
+          <button type="button" onClick={() => onActivatePlan('pro', 'monthly', couponCode)} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
+            Pay Premium monthly
+          </button>
+        </div>
+        <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs font-bold uppercase text-[#1e86bb]">Basic · yearly</p>
+          <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.basic.yearly}</p>
+          <PlanFeatureList includedCount={TAP_TIER_INCLUDED.basic} />
+          <button type="button" onClick={() => onActivatePlan('basic', 'yearly', couponCode)} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
+            Pay Basic yearly
+          </button>
+        </div>
+        <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs font-bold uppercase text-[#1e86bb]">Premium · yearly</p>
+          <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.pro.yearly}</p>
+          <PlanFeatureList includedCount={TAP_TIER_INCLUDED.premium} />
+          <button type="button" onClick={() => onActivatePlan('pro', 'yearly', couponCode)} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
+            Pay Premium yearly
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -64,7 +78,7 @@ interface AccessPaywallProps {
   session: AuthSession;
   reason: AccessBlockReason;
   onLogout: () => void;
-  onActivatePlan: (plan: Exclude<PlanId, 'trial'>, cycle: BillingCycle) => void;
+  onActivatePlan: (plan: Exclude<PlanId, 'trial'>, cycle: BillingCycle, couponCode?: string) => void;
   onRedeemPasscode: (code: string) => Promise<{ ok: boolean; message: string }>;
 }
 

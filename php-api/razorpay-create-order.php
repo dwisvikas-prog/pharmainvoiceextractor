@@ -30,9 +30,26 @@ if (!$user) {
 $body = json_body();
 $planId = $body['planId'] ?? null;
 $billingCycle = $body['billingCycle'] ?? null;
+$couponCode = trim($body['couponCode'] ?? '');
 $amount = plan_pricing_paise($planId, $billingCycle);
 if (!$amount) {
     send_json(400, ['error' => 'Invalid plan selection.']);
+}
+
+$appliedDiscountPercent = 0;
+if ($couponCode) {
+    [$discountPercent, $couponError] = supabase_rpc('validate_coupon', [
+        'p_code' => $couponCode,
+        'p_user_id' => $user['id'],
+    ]);
+    if ($couponError) {
+        $message = str_contains($couponError, 'coupon_already_used') ? 'This coupon has already been used on this account.'
+            : (str_contains($couponError, 'coupon_expired') ? 'This coupon has expired.'
+            : 'Invalid coupon code.');
+        send_json(400, ['error' => $message]);
+    }
+    $appliedDiscountPercent = (int) $discountPercent;
+    $amount = (int) round($amount * (100 - $appliedDiscountPercent) / 100);
 }
 
 // Don't let someone pay again for a plan they already have active - only
@@ -53,7 +70,7 @@ if ($entitlement && $entitlement['plan'] === $planId && $entitlement['billing_cy
 [$status, $bodyText] = http_request('POST', 'https://api.razorpay.com/v1/orders', [
     'amount' => $amount,
     'currency' => 'INR',
-    'notes' => ['userId' => $user['id'], 'planId' => $planId, 'billingCycle' => $billingCycle],
+    'notes' => ['userId' => $user['id'], 'planId' => $planId, 'billingCycle' => $billingCycle, 'couponCode' => $couponCode ?: null],
 ], [
     'Content-Type: application/json',
     'Authorization: Basic ' . base64_encode("$keyId:$keySecret"),
@@ -65,4 +82,10 @@ if ($status < 200 || $status >= 300) {
 }
 
 $order = json_decode($bodyText, true);
-send_json(200, ['orderId' => $order['id'], 'amount' => $order['amount'], 'currency' => $order['currency'], 'keyId' => $keyId]);
+send_json(200, [
+    'orderId' => $order['id'],
+    'amount' => $order['amount'],
+    'currency' => $order['currency'],
+    'keyId' => $keyId,
+    'appliedDiscountPercent' => $appliedDiscountPercent,
+]);

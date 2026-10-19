@@ -22,6 +22,7 @@ export interface PayForPlanOptions {
   billingCycle: 'monthly' | 'yearly';
   name: string;
   email: string;
+  couponCode?: string;
 }
 
 export interface PayForPlanResult {
@@ -37,7 +38,7 @@ export async function payForPlan(options: PayForPlanOptions): Promise<PayForPlan
   const orderRes = await fetch(apiUrl('/api/razorpay-create-order'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify({ planId: options.planId, billingCycle: options.billingCycle }),
+    body: JSON.stringify({ planId: options.planId, billingCycle: options.billingCycle, couponCode: options.couponCode || undefined }),
   });
   if (!orderRes.ok) {
     const err = await orderRes.json().catch(() => ({}));
@@ -69,6 +70,7 @@ export async function payForPlan(options: PayForPlanOptions): Promise<PayForPlan
               razorpay_signature: response.razorpay_signature,
               planId: options.planId,
               billingCycle: options.billingCycle,
+              couponCode: options.couponCode || undefined,
             }),
           });
           const result = await verifyRes.json();

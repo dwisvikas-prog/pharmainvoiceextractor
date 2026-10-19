@@ -9,8 +9,9 @@ require_once __DIR__ . '/_utils.php';
 if (apply_cors()) exit;
 require_post();
 
+$keyId = env('RAZORPAY_KEY_ID');
 $keySecret = env('RAZORPAY_KEY_SECRET');
-if (!$keySecret) {
+if (!$keyId || !$keySecret) {
     send_json(500, ['error' => 'Payments are not configured yet.']);
 }
 
@@ -32,6 +33,7 @@ $paymentId = $body['razorpay_payment_id'] ?? null;
 $signature = $body['razorpay_signature'] ?? null;
 $planId = $body['planId'] ?? null;
 $billingCycle = $body['billingCycle'] ?? null;
+$couponCode = trim($body['couponCode'] ?? '');
 
 if (!$orderId || !$paymentId || !$signature || !$planId || !$billingCycle) {
     send_json(400, ['error' => 'Missing payment details.']);
@@ -45,12 +47,26 @@ if (!hash_equals($expectedSignature, (string) $signature)) {
     send_json(400, ['error' => 'Payment verification failed. If money was deducted, contact support with your payment ID.']);
 }
 
+// Amount actually charged - read it back from Razorpay rather than
+// recomputing locally, so the logged payment always matches what the
+// customer was really billed (coupon discount included).
+$actualAmountPaise = plan_pricing_paise($planId, $billingCycle);
+[$orderStatus, $orderBodyText] = http_request('GET', "https://api.razorpay.com/v1/orders/$orderId", null, [
+    'Authorization: Basic ' . base64_encode("$keyId:$keySecret"),
+]);
+if ($orderStatus >= 200 && $orderStatus < 300) {
+    $orderData = json_decode($orderBodyText, true);
+    if (isset($orderData['amount'])) {
+        $actualAmountPaise = (int) $orderData['amount'];
+    }
+}
+
 [$data, $error] = supabase_rpc('apply_paid_plan', [
     'target_user_id' => $user['id'],
     'new_plan' => $planId,
     'new_cycle' => $billingCycle,
     'days' => $CYCLE_DAYS[$billingCycle],
-    'amount_paise' => plan_pricing_paise($planId, $billingCycle),
+    'amount_paise' => $actualAmountPaise,
     'razorpay_payment_id' => $paymentId,
     'razorpay_order_id' => $orderId,
 ]);
@@ -58,6 +74,12 @@ if (!hash_equals($expectedSignature, (string) $signature)) {
 if ($error) {
     error_log('apply_paid_plan failed: ' . $error);
     send_json(500, ['error' => 'Payment verified but access could not be granted. Contact support with your payment ID.']);
+}
+
+if ($couponCode) {
+    // Best-effort - payment and plan are already granted; don't fail the
+    // request just because marking the coupon used hit a race/edge case.
+    supabase_rpc('redeem_discount_coupon', ['p_code' => $couponCode, 'p_user_id' => $user['id']]);
 }
 
 send_json(200, ['entitlement' => $data]);
