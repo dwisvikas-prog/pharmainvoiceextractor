@@ -18,6 +18,8 @@ export interface AuthSession {
   billingCycle: BillingCycle;
   ocrUsed: number;
   ocrPeriodKey: string;
+  ocrUsedToday: number;
+  ocrDayKey: string;
 }
 
 export interface AuthPayload {
@@ -32,6 +34,15 @@ export const VERIFY_OCR_PAGE_LIMITS: Record<PlanId, number> = {
   trial: 40,
   basic: 100,
   pro: 180
+};
+
+// Per-day cap on top of the monthly limit above - applies the same way to
+// a plan's monthly or yearly billing cycle (e.g. basic monthly=300/yearly=3000
+// both get 20/day). Resets at midnight with no rollover of unused quota.
+export const DAILY_OCR_PAGE_LIMITS: Record<PlanId, number> = {
+  trial: 10,
+  basic: 20,
+  pro: 50
 };
 
 export const PLAN_PRICING = {
@@ -78,10 +89,13 @@ type EntitlementRow = {
   expires_at: string;
   ocr_used: number;
   ocr_period_key: string;
+  ocr_used_today: number;
+  ocr_day_key: string;
   active_session_token: string | null;
 };
 
 export const getVerifyOcrLimit = (plan: PlanId) => VERIFY_OCR_PAGE_LIMITS[plan] ?? VERIFY_OCR_PAGE_LIMITS.trial;
+export const getDailyOcrLimit = (plan: PlanId) => DAILY_OCR_PAGE_LIMITS[plan] ?? DAILY_OCR_PAGE_LIMITS.trial;
 
 export const getDaysUntilExpiry = (expiresAt: string) => {
   const msLeft = new Date(expiresAt).getTime() - Date.now();
@@ -97,11 +111,22 @@ export const isPlanExpired = (session: AuthSession) => new Date(session.expiresA
 
 export const isOcrLimitReached = (session: AuthSession) => session.ocrUsed >= getVerifyOcrLimit(session.plan);
 
-export type AccessBlockReason = 'ok' | 'expired' | 'ocr_limit';
+// ocrUsedToday is only meaningful for the current server day - if the row's
+// day key is stale (nothing recorded yet today), today's usage is really 0,
+// which is also how "no rollover" falls out: yesterday's count just doesn't
+// carry over once the day key moves on.
+const todayKey = () => new Date().toISOString().slice(0, 10);
+
+export const getOcrUsedToday = (session: AuthSession) => (session.ocrDayKey === todayKey() ? session.ocrUsedToday : 0);
+
+export const isDailyOcrLimitReached = (session: AuthSession) => getOcrUsedToday(session) >= getDailyOcrLimit(session.plan);
+
+export type AccessBlockReason = 'ok' | 'expired' | 'ocr_limit' | 'daily_ocr_limit';
 
 export const getAccessBlockReason = (session: AuthSession): AccessBlockReason => {
   if (isPlanExpired(session)) return 'expired';
   if (isOcrLimitReached(session)) return 'ocr_limit';
+  if (isDailyOcrLimitReached(session)) return 'daily_ocr_limit';
   return 'ok';
 };
 
@@ -120,7 +145,9 @@ const buildSession = (
   plan: row.plan,
   billingCycle: row.billing_cycle,
   ocrUsed: row.ocr_used,
-  ocrPeriodKey: row.ocr_period_key
+  ocrPeriodKey: row.ocr_period_key,
+  ocrUsedToday: row.ocr_used_today,
+  ocrDayKey: row.ocr_day_key
 });
 
 const fetchEntitlements = async (userId: string): Promise<EntitlementRow> => {

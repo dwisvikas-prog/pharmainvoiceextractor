@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Check, Ticket, X as XIcon } from 'lucide-react';
-import { PLAN_PRICING, TRIAL_DAYS, getVerifyOcrLimit, type AccessBlockReason, type AuthSession, type BillingCycle, type PlanId } from '../utils/auth';
+import { PLAN_PRICING, TRIAL_DAYS, getVerifyOcrLimit, getDailyOcrLimit, getOcrUsedToday, type AccessBlockReason, type AuthSession, type BillingCycle, type PlanId } from '../utils/auth';
 import { SHOW_PAYMENT_CHECKOUT, TAP_PLAN_FEATURES, TAP_TIER_INCLUDED } from '../utils/constants';
 
 function PlanFeatureList({ includedCount }: { includedCount: number }) {
@@ -70,11 +70,15 @@ interface AccessPaywallProps {
 
 export default function AccessPaywall({ session, reason, onLogout, onActivatePlan, onRedeemPasscode }: AccessPaywallProps) {
   const limit = getVerifyOcrLimit(session.plan);
-  const title = reason === 'ocr_limit' ? 'Verify OCR limit reached' : 'Plan or trial ended';
+  const dailyLimit = getDailyOcrLimit(session.plan);
+  const title =
+    reason === 'ocr_limit' ? 'Verify OCR limit reached'
+    : reason === 'daily_ocr_limit' ? 'Daily OCR limit reached'
+    : 'Plan or trial ended';
   const detail =
-    reason === 'ocr_limit'
-      ? `This account used ${session.ocrUsed} of ${limit} Verify OCR pages this period.`
-      : `Access ended on ${new Date(session.expiresAt).toLocaleDateString('en-IN')}.`;
+    reason === 'ocr_limit' ? `This account used ${session.ocrUsed} of ${limit} Verify OCR pages this period.`
+    : reason === 'daily_ocr_limit' ? `This account used ${getOcrUsedToday(session)} of ${dailyLimit} Verify OCR pages allowed today. This resets tomorrow - unused pages don't carry over.`
+    : `Access ended on ${new Date(session.expiresAt).toLocaleDateString('en-IN')}.`;
 
   const [code, setCode] = useState('');
   const [message, setMessage] = useState('');

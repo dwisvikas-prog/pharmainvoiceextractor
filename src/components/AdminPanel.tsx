@@ -2,8 +2,15 @@
 import { useState, useEffect } from 'react';
 import { ShieldCheck, Search, User, Users } from 'lucide-react';
 import { apiUrl } from '../utils/apiBase';
+import { DAILY_OCR_PAGE_LIMITS, type PlanId } from '../utils/auth';
 
 const ADMIN_TOKEN_KEY = 'dwis_admin_token';
+
+const todayKey = () => new Date().toISOString().slice(0, 10);
+
+// Mirrors getOcrUsedToday() in utils/auth.ts - a stale day key means 0 used today.
+const usedToday = (u: { ocr_used_today: number; ocr_day_key: string }) =>
+  u.ocr_day_key === todayKey() ? u.ocr_used_today : 0;
 
 interface LookedUpUser {
   user_id: string;
@@ -14,6 +21,8 @@ interface LookedUpUser {
   expires_at: string;
   ocr_used: number;
   ocr_period_key: string;
+  ocr_used_today: number;
+  ocr_day_key: string;
 }
 
 interface ListedUser extends LookedUpUser {
@@ -293,11 +302,12 @@ export default function AdminPanel() {
                   <th className="px-3 py-2 font-semibold">Plan</th>
                   <th className="px-3 py-2 font-semibold">Expires</th>
                   <th className="px-3 py-2 font-semibold">OCR used</th>
+                  <th className="px-3 py-2 font-semibold">Today</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {allUsers.length === 0 && !isLoadingUsers && (
-                  <tr><td colSpan={5} className="px-3 py-4 text-center text-slate-400">No users found.</td></tr>
+                  <tr><td colSpan={6} className="px-3 py-4 text-center text-slate-400">No users found.</td></tr>
                 )}
                 {allUsers.map((u) => (
                   <tr
@@ -310,6 +320,9 @@ export default function AdminPanel() {
                     <td className="px-3 py-2 text-slate-700">{u.plan}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-slate-700">{new Date(u.expires_at).toLocaleDateString('en-IN')}</td>
                     <td className="px-3 py-2 text-slate-700">{u.ocr_used}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-slate-700">
+                      {usedToday(u)} / {DAILY_OCR_PAGE_LIMITS[u.plan as PlanId] ?? '—'}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -352,8 +365,14 @@ export default function AdminPanel() {
                 <p className="font-semibold text-slate-900">{new Date(foundUser.expires_at).toLocaleDateString('en-IN')}</p>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <p className="text-[11px] uppercase text-slate-400">OCR used</p>
+                <p className="text-[11px] uppercase text-slate-400">OCR used (period)</p>
                 <p className="font-semibold text-slate-900">{foundUser.ocr_used}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[11px] uppercase text-slate-400">OCR used today</p>
+                <p className="font-semibold text-slate-900">
+                  {usedToday(foundUser)} / {DAILY_OCR_PAGE_LIMITS[foundUser.plan as PlanId] ?? '—'}
+                </p>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                 <p className="text-[11px] uppercase text-slate-400">Billing</p>

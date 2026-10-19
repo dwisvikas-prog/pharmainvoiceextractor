@@ -1,0 +1,17 @@
+# Block direct access to secrets and internals - only the endpoint .php
+# files above should be reachable.
+<FilesMatch "^(\.env.*|_utils\.php)$">
+    Require all denied
+</FilesMatch>
+
+Header set Access-Control-Allow-Headers "Content-Type, Authorization"
+
+# Let the frontend call these as /api/gemini-ocr (no .php extension), exactly
+# like it does on Vercel, with no frontend code changes required. This folder
+# must be uploaded to the server AS "api" (not "php-api") for these paths to
+# line up - see README.md.
+Options +FollowSymLinks -MultiViews
+RewriteEngine On
+RewriteBase /api/
+RewriteCond %{REQUEST_FILENAME}\.php -f
+RewriteRule ^([a-zA-Z0-9_-]+)/?$ $1.php [L]

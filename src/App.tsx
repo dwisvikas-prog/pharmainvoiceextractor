@@ -37,7 +37,7 @@ import MetadataPanel from './components/MetadataPanel';
 import StudioTable from './components/StudioTable';
 import AdminPanel from './components/AdminPanel';
 import { payForPlan } from './utils/payments';
-import { getStoredSession, getDaysUntilExpiry, isExpiryWarningWindow, loginUser, logoutSession, registerUser, redeemPasscode, resendConfirmationEmail, sendPasswordResetEmail, resetPasswordWithRecoveryToken, TRIAL_DAYS, PLAN_PRICING, getAccessBlockReason, getVerifyOcrLimit, recordVerifyOcrPages, isSessionStillActive, SessionInvalidatedError, type AuthSession, type PlanId, type BillingCycle } from './utils/auth';
+import { getStoredSession, getDaysUntilExpiry, isExpiryWarningWindow, loginUser, logoutSession, registerUser, redeemPasscode, resendConfirmationEmail, sendPasswordResetEmail, resetPasswordWithRecoveryToken, TRIAL_DAYS, PLAN_PRICING, getAccessBlockReason, getVerifyOcrLimit, getDailyOcrLimit, getOcrUsedToday, recordVerifyOcrPages, isSessionStillActive, SessionInvalidatedError, type AuthSession, type PlanId, type BillingCycle } from './utils/auth';
 import dwisLogo from './assets/dwis-logo.png';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -2114,6 +2114,9 @@ const handleConvertPdfToCsv = async () => {
           </span>
           <span className="shrink-0 bg-white text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-full font-medium">
             Verify OCR: {session.ocrUsed} / {getVerifyOcrLimit(session.plan)} pages
+          </span>
+          <span className="shrink-0 bg-white text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-full font-medium">
+            Today: {getOcrUsedToday(session)} / {getDailyOcrLimit(session.plan)} pages
           </span>
           <span className="shrink-0 bg-white text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-full font-medium">
             Plan: {session.plan} · {getDaysUntilExpiry(session.expiresAt)} day(s) left
