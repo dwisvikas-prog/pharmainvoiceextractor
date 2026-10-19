@@ -38,6 +38,7 @@ export function PlanCheckoutGrid({ onActivatePlan }: { onActivatePlan: (plan: Ex
         <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
           <p className="text-xs font-bold uppercase text-[#1e86bb]">Basic · monthly</p>
           <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.basic.monthly} incl. GST</p>
+          <p className="mt-1 text-[11px] text-slate-500">About {getVerifyOcrLimit('basic')} Verify OCR pages / month (max {getDailyOcrLimit('basic')}/day, no rollover).</p>
           <PlanFeatureList includedCount={TAP_TIER_INCLUDED.basic} />
           <button type="button" onClick={() => onActivatePlan('basic', 'monthly', couponCode)} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
             Pay Basic monthly
@@ -46,6 +47,7 @@ export function PlanCheckoutGrid({ onActivatePlan }: { onActivatePlan: (plan: Ex
         <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
           <p className="text-xs font-bold uppercase text-[#1e86bb]">Premium · monthly</p>
           <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.pro.monthly}</p>
+          <p className="mt-1 text-[11px] text-slate-500">About {getVerifyOcrLimit('pro')} Verify OCR pages / month (max {getDailyOcrLimit('pro')}/day, no rollover).</p>
           <PlanFeatureList includedCount={TAP_TIER_INCLUDED.premium} />
           <button type="button" onClick={() => onActivatePlan('pro', 'monthly', couponCode)} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
             Pay Premium monthly
@@ -54,6 +56,7 @@ export function PlanCheckoutGrid({ onActivatePlan }: { onActivatePlan: (plan: Ex
         <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
           <p className="text-xs font-bold uppercase text-[#1e86bb]">Basic · yearly</p>
           <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.basic.yearly}</p>
+          <p className="mt-1 text-[11px] text-slate-500">About {getVerifyOcrLimit('basic')} Verify OCR pages / month (max {getDailyOcrLimit('basic')}/day, no rollover).</p>
           <PlanFeatureList includedCount={TAP_TIER_INCLUDED.basic} />
           <button type="button" onClick={() => onActivatePlan('basic', 'yearly', couponCode)} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
             Pay Basic yearly
@@ -62,6 +65,7 @@ export function PlanCheckoutGrid({ onActivatePlan }: { onActivatePlan: (plan: Ex
         <div className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
           <p className="text-xs font-bold uppercase text-[#1e86bb]">Premium · yearly</p>
           <p className="mt-1 text-xl font-black">₹{PLAN_PRICING.pro.yearly}</p>
+          <p className="mt-1 text-[11px] text-slate-500">About {getVerifyOcrLimit('pro')} Verify OCR pages / month (max {getDailyOcrLimit('pro')}/day, no rollover).</p>
           <PlanFeatureList includedCount={TAP_TIER_INCLUDED.premium} />
           <button type="button" onClick={() => onActivatePlan('pro', 'yearly', couponCode)} className="mt-4 rounded-full bg-[#1e86bb] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1970a0]">
             Pay Premium yearly
