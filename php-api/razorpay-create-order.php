@@ -82,6 +82,20 @@ if ($status < 200 || $status >= 300) {
 }
 
 $order = json_decode($bodyText, true);
+
+// Log the attempt now, before we know the outcome, so a payment the user
+// abandons or that fails still shows up in the admin dashboard - not just
+// successful ones.
+supabase_insert('payments', [
+    'user_id' => $user['id'],
+    'plan' => $planId,
+    'billing_cycle' => $billingCycle,
+    'amount_paise' => $amount,
+    'razorpay_order_id' => $order['id'],
+    'status' => 'pending',
+    'source' => 'razorpay',
+]);
+
 send_json(200, [
     'orderId' => $order['id'],
     'amount' => $order['amount'],

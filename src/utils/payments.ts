@@ -46,6 +46,16 @@ export async function payForPlan(options: PayForPlanOptions): Promise<PayForPlan
   }
   const order = await orderRes.json();
 
+  const reportFailure = (reason: string) => {
+    fetch(apiUrl('/api/razorpay-payment-failed'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ razorpay_order_id: order.orderId, reason }),
+    }).catch(() => {
+      // best-effort - this only affects the admin dashboard's record of the attempt
+    });
+  };
+
   await loadRazorpayScript();
 
   return new Promise((resolve, reject) => {
@@ -88,12 +98,17 @@ export async function payForPlan(options: PayForPlanOptions): Promise<PayForPlan
       },
       modal: {
         ondismiss: () => {
-          if (!settled) reject(new Error('Payment cancelled.'));
+          if (!settled) {
+            settled = true;
+            reportFailure('Cancelled by user');
+            reject(new Error('Payment cancelled.'));
+          }
         },
       },
     });
     rzp.on('payment.failed', (response: any) => {
       settled = true;
+      reportFailure(response?.error?.description || 'Payment failed');
       reject(new Error(response?.error?.description || 'Payment failed.'));
     });
     rzp.open();

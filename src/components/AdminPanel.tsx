@@ -47,6 +47,29 @@ const SOURCE_LABEL: Record<string, string> = {
   coupon: 'Coupon',
 };
 
+interface GlobalPaymentRecord {
+  id: number;
+  user_id: string;
+  email: string;
+  name: string;
+  plan: string;
+  billing_cycle: string;
+  amount_paise: number;
+  status: 'pending' | 'success' | 'failed';
+  failure_reason: string | null;
+  source: 'razorpay' | 'cash' | 'coupon';
+  razorpay_payment_id: string | null;
+  razorpay_order_id: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+const STATUS_LABEL: Record<string, { label: string; className: string }> = {
+  success: { label: 'Success', className: 'bg-emerald-100 text-emerald-700' },
+  failed: { label: 'Failed', className: 'bg-red-100 text-red-700' },
+  pending: { label: 'Pending', className: 'bg-amber-100 text-amber-700' },
+};
+
 interface DiscountCoupon {
   code: string;
   discount_percent: number;
@@ -83,6 +106,11 @@ export default function AdminPanel() {
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [listError, setListError] = useState('');
 
+  const [allPayments, setAllPayments] = useState<GlobalPaymentRecord[]>([]);
+  const [isLoadingPayments, setIsLoadingPayments] = useState(false);
+  const [paymentsError, setPaymentsError] = useState('');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<'all' | 'success' | 'failed' | 'pending'>('all');
+
   const [coupons, setCoupons] = useState<DiscountCoupon[]>([]);
   const [isLoadingCoupons, setIsLoadingCoupons] = useState(false);
   const [couponError, setCouponError] = useState('');
@@ -92,6 +120,33 @@ export default function AdminPanel() {
   const [isCreatingCoupon, setIsCreatingCoupon] = useState(false);
 
   const authHeader = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token}` });
+
+  const fetchAllPayments = async () => {
+    if (!token) return;
+    setIsLoadingPayments(true);
+    setPaymentsError('');
+    try {
+      const res = await fetch(apiUrl('/api/admin-payments'), {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({}),
+      });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load payments.');
+      setAllPayments(data.payments || []);
+    } catch (error: any) {
+      setPaymentsError(error?.message || 'Could not load payments.');
+    } finally {
+      setIsLoadingPayments(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!token) return;
+    fetchAllPayments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const fetchCoupons = async () => {
     if (!token) return;
@@ -419,6 +474,68 @@ export default function AdminPanel() {
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-bold text-slate-900">All payments</h2>
+            <div className="flex items-center gap-2">
+              {(['all', 'success', 'failed', 'pending'] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setPaymentStatusFilter(s)}
+                  className={`rounded-full px-3 py-1 text-[11px] font-semibold capitalize ${
+                    paymentStatusFilter === s ? 'bg-blue-600 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+          {paymentsError && <p className="mt-2 text-xs text-red-600">{paymentsError}</p>}
+          <div className="mt-3 max-h-80 overflow-y-auto overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0 bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">Date</th>
+                  <th className="px-3 py-2 font-semibold">User</th>
+                  <th className="px-3 py-2 font-semibold">Plan</th>
+                  <th className="px-3 py-2 font-semibold">Amount</th>
+                  <th className="px-3 py-2 font-semibold">Status</th>
+                  <th className="px-3 py-2 font-semibold">Source</th>
+                  <th className="px-3 py-2 font-semibold">Reference / Reason</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(() => {
+                  const rows = paymentStatusFilter === 'all' ? allPayments : allPayments.filter((p) => p.status === paymentStatusFilter);
+                  if (rows.length === 0 && !isLoadingPayments) {
+                    return <tr><td colSpan={7} className="px-3 py-4 text-center text-slate-400">No payments found.</td></tr>;
+                  }
+                  return rows.map((p) => {
+                    const statusInfo = STATUS_LABEL[p.status] || STATUS_LABEL.pending;
+                    return (
+                      <tr key={p.id} onClick={() => handleSelectFromList(p.email)} className="cursor-pointer hover:bg-blue-50">
+                        <td className="whitespace-nowrap px-3 py-2 text-slate-700">{new Date(p.created_at).toLocaleString('en-IN')}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-slate-700">{p.name} · {p.email}</td>
+                        <td className="px-3 py-2 text-slate-700">{p.plan} · {p.billing_cycle}</td>
+                        <td className="whitespace-nowrap px-3 py-2 font-semibold text-slate-900">
+                          {p.amount_paise > 0 ? `₹${(p.amount_paise / 100).toLocaleString('en-IN')}` : '—'}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${statusInfo.className}`}>{statusInfo.label}</span>
+                        </td>
+                        <td className="px-3 py-2 text-slate-700">{SOURCE_LABEL[p.source] || p.source}</td>
+                        <td className="px-3 py-2 text-slate-500">{p.razorpay_payment_id || p.failure_reason || p.note || '—'}</td>
+                      </tr>
+                    );
+                  });
+                })()}
               </tbody>
             </table>
           </div>

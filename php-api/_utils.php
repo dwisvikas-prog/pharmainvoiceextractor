@@ -181,6 +181,20 @@ function supabase_insert($table, $row) {
     ]);
 }
 
+// Updates rows via PostgREST matching simple eq() filters, e.g.
+// supabase_update('payments', ['razorpay_order_id' => 'eq.' . $orderId], ['status' => 'success'])
+function supabase_update($table, $filters, $patch) {
+    $serviceKey = env('SUPABASE_SERVICE_ROLE_KEY');
+    $query = $filters;
+    $url = supabase_url() . '/rest/v1/' . $table . '?' . http_build_query($query);
+    http_request('PATCH', $url, $patch, [
+        'apikey: ' . $serviceKey,
+        'Authorization: Bearer ' . $serviceKey,
+        'Content-Type: application/json',
+        'Prefer: return=minimal',
+    ]);
+}
+
 // Selects rows via PostgREST with simple eq() filters, e.g.
 // supabase_select('entitlements', ['user_id' => 'eq.' . $id], 'plan,billing_cycle,expires_at')
 function supabase_select($table, $filters, $columns = '*') {

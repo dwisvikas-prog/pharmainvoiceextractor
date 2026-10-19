@@ -61,12 +61,21 @@ if ($orderStatus >= 200 && $orderStatus < 300) {
     }
 }
 
+// The payments row was already inserted (status='pending') when the order
+// was created - update it in place rather than inserting a second row, so
+// apply_paid_plan is told not to insert its own.
+supabase_update('payments', ['razorpay_order_id' => 'eq.' . $orderId], [
+    'status' => 'success',
+    'razorpay_payment_id' => $paymentId,
+    'amount_paise' => $actualAmountPaise,
+]);
+
 [$data, $error] = supabase_rpc('apply_paid_plan', [
     'target_user_id' => $user['id'],
     'new_plan' => $planId,
     'new_cycle' => $billingCycle,
     'days' => $CYCLE_DAYS[$billingCycle],
-    'amount_paise' => $actualAmountPaise,
+    'amount_paise' => null,
     'razorpay_payment_id' => $paymentId,
     'razorpay_order_id' => $orderId,
 ]);
