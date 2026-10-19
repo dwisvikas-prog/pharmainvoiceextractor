@@ -569,6 +569,15 @@ export default function AdminPanel() {
             Percent-off codes for the checkout screen - separate from the trial-extend bonus codes. Each account can use a given coupon only once.
           </p>
 
+          <div className="mt-3 rounded-2xl border border-amber-100 bg-amber-50/60 p-3">
+            <p className="text-[11px] font-bold uppercase text-amber-700">Trial-extend codes (fixed, not in this table)</p>
+            <p className="mt-1 text-xs text-slate-600">
+              <code className="rounded bg-white px-1.5 py-0.5 font-mono">DWIS15</code>,{' '}
+              <code className="rounded bg-white px-1.5 py-0.5 font-mono">DWISFREE</code>,{' '}
+              <code className="rounded bg-white px-1.5 py-0.5 font-mono">TRIAL15</code> — each adds 15 extra trial days when entered in the "Enter bonus offer code" box. Hardcoded in Supabase (not creatable from here); unlimited reuse by any account.
+            </p>
+          </div>
+
           <div className="mt-3 grid gap-2 sm:grid-cols-4">
             <input
               type="text"
