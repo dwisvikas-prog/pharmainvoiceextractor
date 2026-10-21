@@ -402,27 +402,25 @@ export default function AdminPanel() {
 
   if (!token) {
     return (
-      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0b1120] px-4">
-        <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-blue-600/30 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-indigo-600/20 blur-3xl" />
-        <form onSubmit={handleLogin} className="relative w-full max-w-sm rounded-3xl border border-white/10 bg-white/[0.06] p-7 shadow-2xl backdrop-blur-xl">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg shadow-blue-900/40">
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+        <form onSubmit={handleLogin} className="w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-7 shadow-xl">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 shadow-lg shadow-blue-600/30">
             <ShieldCheck className="h-6 w-6 text-white" />
           </div>
-          <p className="mt-4 text-center text-[11px] font-bold uppercase tracking-[0.2em] text-blue-300">DWIS TAP Admin</p>
-          <h1 className="mt-1 text-center text-xl font-black text-white">Welcome back</h1>
-          <p className="mt-1 text-center text-sm text-slate-400">Enter the admin passcode to continue.</p>
+          <p className="mt-4 text-center text-[11px] font-bold uppercase tracking-[0.2em] text-blue-700">DWIS TAP Admin</p>
+          <h1 className="mt-1 text-center text-xl font-black text-slate-900">Welcome back</h1>
+          <p className="mt-1 text-center text-sm text-slate-500">Enter the admin passcode to continue.</p>
           <input
             type="password"
             value={passcodeInput}
             onChange={(e) => setPasscodeInput(e.target.value)}
             placeholder="Admin passcode"
-            className="mt-5 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-500 outline-none transition focus:border-blue-400 focus:bg-white/10"
+            className="mt-5 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-blue-500 focus:bg-white"
             required
             autoFocus
           />
           {loginError && (
-            <p className="mt-3 flex items-center gap-1.5 rounded-xl bg-red-500/10 px-3 py-2 text-xs font-medium text-red-300">
+            <p className="mt-3 flex items-center gap-1.5 rounded-xl bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
               {loginError}
             </p>
@@ -430,7 +428,7 @@ export default function AdminPanel() {
           <button
             type="submit"
             disabled={isLoggingIn}
-            className="mt-4 w-full rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-900/40 transition hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50"
+            className="mt-4 w-full rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/30 transition hover:bg-blue-700 disabled:opacity-50"
           >
             {isLoggingIn ? 'Checking…' : 'Enter dashboard'}
           </button>
@@ -451,16 +449,16 @@ export default function AdminPanel() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-100 lg:flex">
+    <div className="min-h-screen bg-slate-50 lg:flex">
       {/* Sidebar (desktop) */}
-      <aside className="hidden w-64 shrink-0 flex-col bg-[#0b1120] px-4 py-6 lg:flex">
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white px-4 py-6 lg:flex">
         <div className="flex items-center gap-2.5 px-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg shadow-blue-900/40">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 shadow-lg shadow-blue-600/30">
             <ShieldCheck className="h-5 w-5 text-white" />
           </div>
           <div>
-            <p className="text-sm font-black leading-tight text-white">DWIS TAP</p>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-300">Admin</p>
+            <p className="text-sm font-black leading-tight text-slate-900">DWIS TAP</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-700">Admin</p>
           </div>
         </div>
         <nav className="mt-8 flex flex-1 flex-col gap-1">
@@ -473,7 +471,7 @@ export default function AdminPanel() {
                 type="button"
                 onClick={() => setActiveTab(item.key)}
                 className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
-                  isActive ? 'bg-blue-600/15 text-blue-400' : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                  isActive ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
                 }`}
               >
                 <Icon className="h-4 w-4 shrink-0" />
@@ -485,7 +483,7 @@ export default function AdminPanel() {
         <button
           type="button"
           onClick={handleLogout}
-          className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
+          className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
         >
           <LogOut className="h-4 w-4 shrink-0" />
           Logout
@@ -493,24 +491,24 @@ export default function AdminPanel() {
       </aside>
 
       {/* Mobile top bar + drawer */}
-      <div className="sticky top-0 z-20 flex items-center justify-between bg-[#0b1120] px-4 py-3 lg:hidden">
+      <div className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
         <div className="flex items-center gap-2.5">
-          <button type="button" onClick={() => setMenuOpen((v) => !v)} className="rounded-full border border-white/10 bg-white/5 p-2 text-white" aria-label="Menu">
+          <button type="button" onClick={() => setMenuOpen((v) => !v)} className="rounded-full border border-slate-200 bg-slate-50 p-2 text-slate-700" aria-label="Menu">
             {menuOpen ? <CloseIcon className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
           </button>
-          <div className="flex items-center gap-2 text-white">
-            <ShieldCheck className="h-4 w-4 text-blue-400" />
+          <div className="flex items-center gap-2 text-slate-900">
+            <ShieldCheck className="h-4 w-4 text-blue-600" />
             <p className="text-xs font-bold uppercase tracking-[0.14em]">DWIS TAP Admin</p>
           </div>
         </div>
-        <button type="button" onClick={handleLogout} className="rounded-full border border-white/10 bg-white/5 p-2 text-white" aria-label="Logout">
+        <button type="button" onClick={handleLogout} className="rounded-full border border-slate-200 bg-slate-50 p-2 text-slate-700" aria-label="Logout">
           <LogOut className="h-4 w-4" />
         </button>
       </div>
       {menuOpen && (
         <div className="fixed inset-0 z-30 lg:hidden">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setMenuOpen(false)} />
-          <div className="absolute left-0 top-0 h-full w-64 bg-[#0b1120] p-4 shadow-2xl">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setMenuOpen(false)} />
+          <div className="absolute left-0 top-0 h-full w-64 bg-white p-4 shadow-2xl">
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               return (
@@ -519,7 +517,7 @@ export default function AdminPanel() {
                   type="button"
                   onClick={() => { setActiveTab(item.key); setMenuOpen(false); }}
                   className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium ${
-                    activeTab === item.key ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                    activeTab === item.key ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
                   }`}
                 >
                   <Icon className="h-4 w-4" />
