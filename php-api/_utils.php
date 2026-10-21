@@ -229,6 +229,30 @@ function get_calling_user() {
     return isset($data['id']) ? $data : null;
 }
 
+const ADMIN_LOGIN_WINDOW_SECONDS = 15 * 60;
+const ADMIN_LOGIN_MAX_FAILURES = 5;
+
+// Blocks further passcode attempts once an IP has racked up too many recent
+// failures, so the passcode can't just be brute-forced over the network.
+// Mirrors isAdminLoginRateLimited() in api/_utils.js. Fails open if Supabase
+// is unreachable/not configured - availability of the login form must never
+// hinge on this check.
+function is_admin_login_rate_limited($ip) {
+    if (!$ip || !supabase_configured()) return false;
+    try {
+        $since = gmdate('Y-m-d\TH:i:s\Z', time() - ADMIN_LOGIN_WINDOW_SECONDS);
+        $rows = supabase_select('admin_login_attempts', [
+            'ip' => 'eq.' . $ip,
+            'success' => 'eq.false',
+            'created_at' => 'gte.' . $since,
+        ], 'id');
+        if (!is_array($rows)) return false;
+        return count($rows) >= ADMIN_LOGIN_MAX_FAILURES;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
 // Minimal cURL wrapper. Returns [httpStatus, rawBody].
 function http_request($method, $url, $jsonBody, $headers) {
     $ch = curl_init($url);

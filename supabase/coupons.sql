@@ -85,6 +85,12 @@ begin
           expires_at = excluded.expires_at,
           active = true
     returning * into result;
+
+  -- admin_audit_log.target_email is reused to hold the coupon code here -
+  -- this table started as grant/expire-only, this avoids a schema change.
+  insert into public.admin_audit_log (target_email, extra_days, new_plan, action)
+    values (result.code, p_discount_percent, null, 'coupon_create');
+
   return result;
 end;
 $$;
@@ -104,6 +110,10 @@ begin
   if result is null then
     raise exception 'coupon_not_found';
   end if;
+
+  insert into public.admin_audit_log (target_email, extra_days, new_plan, action)
+    values (result.code, 0, null, case when p_active then 'coupon_enable' else 'coupon_disable' end);
+
   return result;
 end;
 $$;

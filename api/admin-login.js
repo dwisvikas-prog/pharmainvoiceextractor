@@ -1,7 +1,7 @@
 // Admin login for the /#admin panel. Totally separate from Supabase user
 // auth - just checks a shared secret (ADMIN_PASSCODE, server-side env var)
 // and hands back a signed, stateless token the client stores locally.
-import { signAdminToken, getServiceClient, getRequestIp, logAdminLoginAttempt, applyCors } from './_utils.js';
+import { signAdminToken, getServiceClient, getRequestIp, logAdminLoginAttempt, isAdminLoginRateLimited, applyCors } from './_utils.js';
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -16,6 +16,11 @@ export default async function handler(req, res) {
 
   if (!adminPasscode || !process.env.ADMIN_TOKEN_SECRET) {
     res.status(500).json({ error: 'Admin panel is not configured (ADMIN_PASSCODE / ADMIN_TOKEN_SECRET missing).' });
+    return;
+  }
+
+  if (await isAdminLoginRateLimited(supabase, ip)) {
+    res.status(429).json({ error: 'Too many failed attempts. Try again in 15 minutes.' });
     return;
   }
 

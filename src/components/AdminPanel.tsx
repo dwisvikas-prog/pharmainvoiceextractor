@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { useState, useEffect } from 'react';
-import { ShieldCheck, Search, User, Users, Ticket, Menu, X as CloseIcon, CreditCard } from 'lucide-react';
+import { ShieldCheck, Search, User, Users, Ticket, Menu, X as CloseIcon, CreditCard, LogOut, IndianRupee, TrendingUp, AlertCircle } from 'lucide-react';
 import { apiUrl } from '../utils/apiBase';
 import { DAILY_OCR_PAGE_LIMITS, type PlanId } from '../utils/auth';
 
@@ -129,6 +129,7 @@ export default function AdminPanel() {
   const [newCouponPercent, setNewCouponPercent] = useState('10');
   const [newCouponExpiry, setNewCouponExpiry] = useState('');
   const [isCreatingCoupon, setIsCreatingCoupon] = useState(false);
+  const [showTrialCodes, setShowTrialCodes] = useState(false);
 
   const authHeader = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token}` });
 
@@ -401,98 +402,171 @@ export default function AdminPanel() {
 
   if (!token) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f8fafc] px-4">
-        <form onSubmit={handleLogin} className="w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
-          <div className="flex items-center gap-2 text-blue-700">
-            <ShieldCheck className="h-5 w-5" />
-            <p className="text-xs font-bold uppercase tracking-[0.16em]">DWIS TAP Admin</p>
+      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0b1120] px-4">
+        <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-blue-600/30 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-indigo-600/20 blur-3xl" />
+        <form onSubmit={handleLogin} className="relative w-full max-w-sm rounded-3xl border border-white/10 bg-white/[0.06] p-7 shadow-2xl backdrop-blur-xl">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg shadow-blue-900/40">
+            <ShieldCheck className="h-6 w-6 text-white" />
           </div>
-          <h1 className="mt-3 text-xl font-black text-slate-900">Admin login</h1>
-          <p className="mt-1 text-sm text-slate-600">Separate from user login. Enter the admin passcode to continue.</p>
+          <p className="mt-4 text-center text-[11px] font-bold uppercase tracking-[0.2em] text-blue-300">DWIS TAP Admin</p>
+          <h1 className="mt-1 text-center text-xl font-black text-white">Welcome back</h1>
+          <p className="mt-1 text-center text-sm text-slate-400">Enter the admin passcode to continue.</p>
           <input
             type="password"
             value={passcodeInput}
             onChange={(e) => setPasscodeInput(e.target.value)}
             placeholder="Admin passcode"
-            className="mt-4 w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+            className="mt-5 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-500 outline-none transition focus:border-blue-400 focus:bg-white/10"
             required
+            autoFocus
           />
-          {loginError && <p className="mt-2 text-xs text-red-600">{loginError}</p>}
-          <button type="submit" disabled={isLoggingIn} className="mt-4 w-full rounded-full bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-cta transition hover:bg-blue-700 disabled:opacity-50">
-            {isLoggingIn ? 'Checking…' : 'Enter'}
+          {loginError && (
+            <p className="mt-3 flex items-center gap-1.5 rounded-xl bg-red-500/10 px-3 py-2 text-xs font-medium text-red-300">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              {loginError}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={isLoggingIn}
+            className="mt-4 w-full rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-900/40 transition hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50"
+          >
+            {isLoggingIn ? 'Checking…' : 'Enter dashboard'}
           </button>
         </form>
       </div>
     );
   }
 
+  const revenueTotal = allPayments.filter((p) => p.status === 'success').reduce((sum, p) => sum + p.amount_paise, 0) / 100;
+  const failedCount = allPayments.filter((p) => p.status === 'failed').length;
+  const paidPlansCount = allUsers.filter((u) => u.plan !== 'trial').length;
+
+  const KPI_CARDS = [
+    { label: 'Total users', value: allUsers.length.toLocaleString('en-IN'), icon: Users, iconBg: 'bg-blue-50', iconColor: 'text-blue-600' },
+    { label: 'Paid plans', value: paidPlansCount.toLocaleString('en-IN'), icon: TrendingUp, iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600' },
+    { label: 'Revenue (success)', value: `₹${revenueTotal.toLocaleString('en-IN')}`, icon: IndianRupee, iconBg: 'bg-indigo-50', iconColor: 'text-indigo-600' },
+    { label: 'Failed payments', value: failedCount.toLocaleString('en-IN'), icon: AlertCircle, iconBg: 'bg-rose-50', iconColor: 'text-rose-600' },
+  ];
+
   return (
-    <div className="min-h-screen bg-[#f8fafc] px-4 py-10">
-      <div className="mx-auto max-w-4xl">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setMenuOpen((v) => !v)}
-              className="rounded-full border border-slate-200 bg-white p-2 text-slate-700 hover:bg-slate-50"
-              aria-label="Menu"
-            >
-              {menuOpen ? <CloseIcon className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-            </button>
-            <div className="flex items-center gap-2 text-blue-700">
-              <ShieldCheck className="h-5 w-5" />
-              <p className="text-xs font-bold uppercase tracking-[0.16em]">DWIS TAP Admin</p>
-            </div>
+    <div className="min-h-screen bg-slate-100 lg:flex">
+      {/* Sidebar (desktop) */}
+      <aside className="hidden w-64 shrink-0 flex-col bg-[#0b1120] px-4 py-6 lg:flex">
+        <div className="flex items-center gap-2.5 px-2">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg shadow-blue-900/40">
+            <ShieldCheck className="h-5 w-5 text-white" />
           </div>
-          <button type="button" onClick={handleLogout} className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
-            Logout
-          </button>
+          <div>
+            <p className="text-sm font-black leading-tight text-white">DWIS TAP</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-300">Admin</p>
+          </div>
         </div>
-
-        <div className="relative">
-          {menuOpen && (
-            <>
-              <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} />
-              <div className="absolute left-0 top-2 z-30 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
-                {NAV_ITEMS.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      onClick={() => { setActiveTab(item.key); setMenuOpen(false); }}
-                      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium ${
-                        activeTab === item.key ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {item.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="mt-3 hidden gap-2 sm:flex">
+        <nav className="mt-8 flex flex-1 flex-col gap-1">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
+            const isActive = activeTab === item.key;
             return (
               <button
                 key={item.key}
                 type="button"
                 onClick={() => setActiveTab(item.key)}
-                className={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold ${
-                  activeTab === item.key ? 'bg-blue-600 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
+                  isActive ? 'bg-blue-600/15 text-blue-400' : 'text-slate-400 hover:bg-white/5 hover:text-white'
                 }`}
               >
-                <Icon className="h-3.5 w-3.5" />
+                <Icon className="h-4 w-4 shrink-0" />
                 {item.label}
               </button>
             );
           })}
+        </nav>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
+        >
+          <LogOut className="h-4 w-4 shrink-0" />
+          Logout
+        </button>
+      </aside>
+
+      {/* Mobile top bar + drawer */}
+      <div className="sticky top-0 z-20 flex items-center justify-between bg-[#0b1120] px-4 py-3 lg:hidden">
+        <div className="flex items-center gap-2.5">
+          <button type="button" onClick={() => setMenuOpen((v) => !v)} className="rounded-full border border-white/10 bg-white/5 p-2 text-white" aria-label="Menu">
+            {menuOpen ? <CloseIcon className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+          </button>
+          <div className="flex items-center gap-2 text-white">
+            <ShieldCheck className="h-4 w-4 text-blue-400" />
+            <p className="text-xs font-bold uppercase tracking-[0.14em]">DWIS TAP Admin</p>
+          </div>
         </div>
+        <button type="button" onClick={handleLogout} className="rounded-full border border-white/10 bg-white/5 p-2 text-white" aria-label="Logout">
+          <LogOut className="h-4 w-4" />
+        </button>
+      </div>
+      {menuOpen && (
+        <div className="fixed inset-0 z-30 lg:hidden">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setMenuOpen(false)} />
+          <div className="absolute left-0 top-0 h-full w-64 bg-[#0b1120] p-4 shadow-2xl">
+            {NAV_ITEMS.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => { setActiveTab(item.key); setMenuOpen(false); }}
+                  className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium ${
+                    activeTab === item.key ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Main content */}
+      <div className="flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <div className="mx-auto max-w-5xl">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {KPI_CARDS.map((kpi) => {
+              const Icon = kpi.icon;
+              return (
+                <div key={kpi.label} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${kpi.iconBg}`}>
+                    <Icon className={`h-5 w-5 ${kpi.iconColor}`} />
+                  </div>
+                  <p className="mt-3 text-xl font-bold text-slate-900">{kpi.value}</p>
+                  <p className="mt-0.5 text-xs font-medium text-slate-500">{kpi.label}</p>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-5 hidden gap-2 sm:flex">
+            {NAV_ITEMS.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setActiveTab(item.key)}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition ${
+                    activeTab === item.key ? 'bg-slate-900 text-white shadow-md' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
 
         {activeTab === 'users' && (
         <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
@@ -645,11 +719,27 @@ export default function AdminPanel() {
           </p>
 
           <div className="mt-3 rounded-2xl border border-amber-100 bg-amber-50/60 p-3">
-            <p className="text-[11px] font-bold uppercase text-amber-700">Trial-extend codes (fixed, not in this table)</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-bold uppercase text-amber-700">Trial-extend codes (fixed, not in this table)</p>
+              <button
+                type="button"
+                onClick={() => setShowTrialCodes((v) => !v)}
+                className="shrink-0 rounded-full border border-amber-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-50"
+              >
+                {showTrialCodes ? 'Hide' : 'Reveal'}
+              </button>
+            </div>
             <p className="mt-1 text-xs text-slate-600">
-              <code className="rounded bg-white px-1.5 py-0.5 font-mono">DWIS15</code>,{' '}
-              <code className="rounded bg-white px-1.5 py-0.5 font-mono">DWISFREE</code>,{' '}
-              <code className="rounded bg-white px-1.5 py-0.5 font-mono">TRIAL15</code> — each adds 15 extra trial days when entered in the "Enter bonus offer code" box. Hardcoded in Supabase (not creatable from here); unlimited reuse by any account.
+              {showTrialCodes ? (
+                <>
+                  <code className="rounded bg-white px-1.5 py-0.5 font-mono">DWIS15</code>,{' '}
+                  <code className="rounded bg-white px-1.5 py-0.5 font-mono">DWISFREE</code>,{' '}
+                  <code className="rounded bg-white px-1.5 py-0.5 font-mono">TRIAL15</code>
+                </>
+              ) : (
+                <code className="rounded bg-white px-1.5 py-0.5 font-mono tracking-widest text-slate-400">••••••</code>
+              )}
+              {' '}— each adds 15 extra trial days when entered in the "Enter bonus offer code" box. Hardcoded in Supabase (not creatable from here); unlimited reuse by any account.
             </p>
           </div>
 
@@ -875,6 +965,7 @@ export default function AdminPanel() {
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

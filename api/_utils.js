@@ -72,6 +72,30 @@ export async function logAdminLoginAttempt(supabase, success, ip) {
   }
 }
 
+const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const ADMIN_LOGIN_MAX_FAILURES = 5;
+
+// Blocks further passcode attempts once an IP has racked up too many recent
+// failures, so the passcode can't just be brute-forced over the network.
+// Fails open (returns not-limited) if we can't reach Supabase - availability
+// of the login form must never hinge on this check.
+export async function isAdminLoginRateLimited(supabase, ip) {
+  if (!supabase || !ip) return false;
+  try {
+    const since = new Date(Date.now() - ADMIN_LOGIN_WINDOW_MS).toISOString();
+    const { count, error } = await supabase
+      .from('admin_login_attempts')
+      .select('id', { count: 'exact', head: true })
+      .eq('ip', ip)
+      .eq('success', false)
+      .gte('created_at', since);
+    if (error) return false;
+    return (count || 0) >= ADMIN_LOGIN_MAX_FAILURES;
+  } catch {
+    return false;
+  }
+}
+
 // Single source of truth for plan prices, shared by order-create (which
 // charges this amount) and payment-verify (which records this amount as
 // paid) - keep in sync with src/utils/auth.ts PLAN_PRICING. Amount is in
