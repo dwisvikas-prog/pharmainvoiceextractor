@@ -36,6 +36,8 @@ import AccessPaywall, { PlanCheckoutGrid } from './components/AccessPaywall';
 import MetadataPanel from './components/MetadataPanel';
 import StudioTable from './components/StudioTable';
 import AdminPanel from './components/AdminPanel';
+import ChatWidget from './components/ChatWidget';
+import UserProfile from './components/UserProfile';
 import { payForPlan } from './utils/payments';
 import { getStoredSession, getDaysUntilExpiry, isExpiryWarningWindow, loginUser, logoutSession, registerUser, redeemPasscode, resendConfirmationEmail, sendPasswordResetEmail, resetPasswordWithRecoveryToken, TRIAL_DAYS, PLAN_PRICING, getAccessBlockReason, getVerifyOcrLimit, getDailyOcrLimit, getOcrUsedToday, recordVerifyOcrPages, isSessionStillActive, SessionInvalidatedError, type AuthSession, type PlanId, type BillingCycle } from './utils/auth';
 import dwisLogo from './assets/dwis-logo.png';
@@ -274,6 +276,7 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [authSuccess, setAuthSuccess] = useState('');
+  const [showUserProfile, setShowUserProfile] = useState(false);
   const [sessionKickedOutMessage, setSessionKickedOutMessage] = useState('');
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
   const [recoveryTokenHash, setRecoveryTokenHash] = useState('');
@@ -457,7 +460,7 @@ export default function App() {
     setIsSendingReset(true);
     try {
       await sendPasswordResetEmail(forgotEmail);
-      setForgotStatus('If an account exists for that email, a reset link has been sent. Check your inbox (and spam folder).');
+      setForgotStatus('Reset link sent. Check your inbox (and spam folder).');
     } catch (error: any) {
       setForgotStatus(error?.message || 'Could not send reset email. Try again shortly.');
     } finally {
@@ -1941,7 +1944,7 @@ const handleConvertPdfToCsv = async () => {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <img src={dwisLogo} alt="DWIS TAP" className="h-10 w-auto object-contain sm:h-12" />
             <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700">
-              <span>{session.user.name}</span>
+              <button type="button" onClick={() => setShowUserProfile(true)} className="underline-offset-2 hover:underline">{session.user.name}</button>
               {session.plan === 'trial' && (
                 <button
                   type="button"
@@ -1996,6 +1999,14 @@ const handleConvertPdfToCsv = async () => {
             </div>
           </div>
         )}
+        {showUserProfile && (
+          <UserProfile
+            session={session}
+            onClose={() => setShowUserProfile(false)}
+            onLogout={() => { setShowUserProfile(false); handleLogout(); }}
+            onNameUpdated={(name) => setSession((prev) => prev ? { ...prev, user: { ...prev.user, name } } : prev)}
+          />
+        )}
       </div>
     );
   }
@@ -2041,7 +2052,7 @@ const handleConvertPdfToCsv = async () => {
 
           {session ? (
             <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700">
-              <span>{session.user.name}</span>
+              <button type="button" onClick={() => setShowUserProfile(true)} className="underline-offset-2 hover:underline">{session.user.name}</button>
               <button
                 type="button"
                 onClick={handleLogout}
@@ -2628,6 +2639,15 @@ const handleConvertPdfToCsv = async () => {
         <img src={dwisLogo} alt="DWIS TAP" className="mx-auto mb-2 h-7 w-auto object-contain" />
         Invoice extractor · Upload, OCR, 34-column ERP, Excel export
       </footer>
+      <ChatWidget userId={session.user.id} />
+      {showUserProfile && (
+        <UserProfile
+          session={session}
+          onClose={() => setShowUserProfile(false)}
+          onLogout={() => { setShowUserProfile(false); handleLogout(); }}
+          onNameUpdated={(name) => setSession((prev) => prev ? { ...prev, user: { ...prev.user, name } } : prev)}
+        />
+      )}
     </div>
   );
 }

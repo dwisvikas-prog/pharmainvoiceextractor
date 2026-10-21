@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { useState, useEffect } from 'react';
-import { ShieldCheck, Search, User, Users, Ticket, Menu, X as CloseIcon, CreditCard, LogOut, IndianRupee, TrendingUp, AlertCircle } from 'lucide-react';
+import { ShieldCheck, Search, User, Users, Ticket, Menu, X as CloseIcon, CreditCard, LogOut, IndianRupee, TrendingUp, AlertCircle, Bell, UserPlus, Clock, MessageCircle, Send, Download, History } from 'lucide-react';
 import { apiUrl } from '../utils/apiBase';
 import { DAILY_OCR_PAGE_LIMITS, type PlanId } from '../utils/auth';
 
@@ -79,14 +79,59 @@ interface DiscountCoupon {
   times_redeemed: number;
 }
 
-type AdminTab = 'users' | 'payments' | 'coupons' | 'find';
+type AdminTab = 'users' | 'payments' | 'coupons' | 'find' | 'chat' | 'analytics' | 'activity' | 'profile';
 
 const NAV_ITEMS: { key: AdminTab; label: string; icon: typeof Users }[] = [
   { key: 'users', label: 'Registered users', icon: Users },
   { key: 'payments', label: 'All payments', icon: CreditCard },
   { key: 'coupons', label: 'Discount coupons', icon: Ticket },
   { key: 'find', label: 'Find a user', icon: Search },
+  { key: 'chat', label: 'Support chat', icon: MessageCircle },
+  { key: 'analytics', label: 'Analytics', icon: TrendingUp },
+  { key: 'activity', label: 'Activity log', icon: Clock },
+  { key: 'profile', label: 'Admin profile', icon: ShieldCheck },
 ];
+
+// Minimal CSV export - escapes quotes/commas, triggers a browser download.
+// No backend needed: the admin panel already has every row loaded client-side.
+function downloadCsv(filename: string, rows: Record<string, any>[]) {
+  if (rows.length === 0) return;
+  const headers = Object.keys(rows[0]);
+  const escape = (v: any) => {
+    const s = v === null || v === undefined ? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [headers.join(','), ...rows.map((r) => headers.map((h) => escape(r[h])).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Fixed categorical + status hues (never reassigned/cycled) - see dataviz skill.
+const PLAN_COLOR: Record<string, string> = { trial: '#2a78d6', basic: '#eb6834', pro: '#1baf7a' };
+const STATUS_COLOR: Record<string, string> = { success: '#0ca30c', failed: '#d03b3b', pending: '#fab219' };
+
+const last14Days = () => {
+  const days: string[] = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    days.push(d.toISOString().slice(0, 10));
+  }
+  return days;
+};
+
+const EXPIRY_WARNING_DAYS = 4;
+const NEW_SIGNUP_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+const daysUntil = (expiresAt: string) => {
+  const msLeft = new Date(expiresAt).getTime() - Date.now();
+  return Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60 * 24)));
+};
 
 export default function AdminPanel() {
   const [token, setToken] = useState<string | null>(() => {
@@ -94,6 +139,7 @@ export default function AdminPanel() {
   });
   const [activeTab, setActiveTab] = useState<AdminTab>('users');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
   const [passcodeInput, setPasscodeInput] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -116,11 +162,18 @@ export default function AdminPanel() {
   const [listSearch, setListSearch] = useState('');
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [listError, setListError] = useState('');
+  const [userPlanFilter, setUserPlanFilter] = useState<'all' | 'trial' | 'basic' | 'pro'>('all');
 
   const [allPayments, setAllPayments] = useState<GlobalPaymentRecord[]>([]);
   const [isLoadingPayments, setIsLoadingPayments] = useState(false);
   const [paymentsError, setPaymentsError] = useState('');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<'all' | 'success' | 'failed' | 'pending'>('all');
+  const [paymentFromDate, setPaymentFromDate] = useState('');
+  const [paymentToDate, setPaymentToDate] = useState('');
+
+  const [auditEntries, setAuditEntries] = useState<any[]>([]);
+  const [isLoadingAudit, setIsLoadingAudit] = useState(false);
+  const [auditError, setAuditError] = useState('');
 
   const [coupons, setCoupons] = useState<DiscountCoupon[]>([]);
   const [isLoadingCoupons, setIsLoadingCoupons] = useState(false);
@@ -130,6 +183,14 @@ export default function AdminPanel() {
   const [newCouponExpiry, setNewCouponExpiry] = useState('');
   const [isCreatingCoupon, setIsCreatingCoupon] = useState(false);
   const [showTrialCodes, setShowTrialCodes] = useState(false);
+
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [isLoadingConversations, setIsLoadingConversations] = useState(false);
+  const [chatError, setChatError] = useState('');
+  const [activeChatUserId, setActiveChatUserId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isSendingChat, setIsSendingChat] = useState(false);
 
   const authHeader = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token}` });
 
@@ -186,6 +247,115 @@ export default function AdminPanel() {
     fetchCoupons();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  const fetchAuditLog = async () => {
+    if (!token) return;
+    setIsLoadingAudit(true);
+    setAuditError('');
+    try {
+      const res = await fetch(apiUrl('/api/admin-audit'), {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({}),
+      });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load activity log.');
+      setAuditEntries(data.entries || []);
+    } catch (error: any) {
+      setAuditError(error?.message || 'Could not load activity log.');
+    } finally {
+      setIsLoadingAudit(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!token || activeTab !== 'activity') return;
+    fetchAuditLog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, activeTab]);
+
+  const fetchConversations = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(apiUrl('/api/admin-chat'), {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({ action: 'conversations' }),
+      });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load conversations.');
+      setConversations(data.conversations || []);
+    } catch (error: any) {
+      setChatError(error?.message || 'Could not load conversations.');
+    } finally {
+      setIsLoadingConversations(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!token || activeTab !== 'chat') return;
+    setIsLoadingConversations(true);
+    fetchConversations();
+    const timer = setInterval(fetchConversations, 6000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, activeTab]);
+
+  const fetchChatMessages = async (userId: string) => {
+    if (!token) return;
+    try {
+      const res = await fetch(apiUrl('/api/admin-chat'), {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({ action: 'messages', userId }),
+      });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load messages.');
+      setChatMessages(data.messages || []);
+    } catch (error: any) {
+      setChatError(error?.message || 'Could not load messages.');
+    }
+  };
+
+  useEffect(() => {
+    if (!token || !activeChatUserId) return;
+    fetchChatMessages(activeChatUserId);
+    const timer = setInterval(() => fetchChatMessages(activeChatUserId), 4000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, activeChatUserId]);
+
+  const handleOpenChat = (userId: string) => {
+    setActiveChatUserId(userId);
+    setChatMessages([]);
+  };
+
+  const handleSendChat = async () => {
+    const text = chatInput.trim();
+    if (!text || !activeChatUserId) return;
+    setIsSendingChat(true);
+    setChatError('');
+    try {
+      const res = await fetch(apiUrl('/api/admin-chat'), {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({ action: 'send', userId: activeChatUserId, body: text }),
+      });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not send message.');
+      setChatInput('');
+      fetchChatMessages(activeChatUserId);
+      fetchConversations();
+    } catch (error: any) {
+      setChatError(error?.message || 'Could not send message.');
+    } finally {
+      setIsSendingChat(false);
+    }
+  };
 
   const handleCreateCoupon = async () => {
     const percent = Number(newCouponPercent);
@@ -441,6 +611,44 @@ export default function AdminPanel() {
   const failedCount = allPayments.filter((p) => p.status === 'failed').length;
   const paidPlansCount = allUsers.filter((u) => u.plan !== 'trial').length;
 
+  const newSignups = allUsers
+    .filter((u) => Date.now() - new Date(u.created_at).getTime() <= NEW_SIGNUP_WINDOW_MS)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const expiringSoon = allUsers
+    .filter((u) => { const d = daysUntil(u.expires_at); return d > 0 && d <= EXPIRY_WARNING_DAYS; })
+    .sort((a, b) => daysUntil(a.expires_at) - daysUntil(b.expires_at));
+  const recentFailedPayments = allPayments
+    .filter((p) => p.status === 'failed' && Date.now() - new Date(p.created_at).getTime() <= NEW_SIGNUP_WINDOW_MS)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const notifCount = newSignups.length + expiringSoon.length + recentFailedPayments.length;
+
+  const days14 = last14Days();
+  const revenueByDay = days14.map((day) => ({
+    day,
+    amount: allPayments
+      .filter((p) => p.status === 'success' && p.created_at.slice(0, 10) === day)
+      .reduce((sum, p) => sum + p.amount_paise, 0) / 100,
+  }));
+  const maxDailyRevenue = Math.max(1, ...revenueByDay.map((d) => d.amount));
+
+  const signupsByDay = days14.map((day) => ({
+    day,
+    count: allUsers.filter((u) => u.created_at.slice(0, 10) === day).length,
+  }));
+  const maxDailySignups = Math.max(1, ...signupsByDay.map((d) => d.count));
+
+  const planCounts = ['trial', 'basic', 'pro'].map((plan) => ({
+    plan,
+    count: allUsers.filter((u) => u.plan === plan).length,
+  }));
+  const maxPlanCount = Math.max(1, ...planCounts.map((p) => p.count));
+
+  const statusCounts = (['success', 'failed', 'pending'] as const).map((status) => ({
+    status,
+    count: allPayments.filter((p) => p.status === status).length,
+  }));
+  const maxStatusCount = Math.max(1, ...statusCounts.map((s) => s.count));
+
   const KPI_CARDS = [
     { label: 'Total users', value: allUsers.length.toLocaleString('en-IN'), icon: Users, iconBg: 'bg-blue-50', iconColor: 'text-blue-600' },
     { label: 'Paid plans', value: paidPlansCount.toLocaleString('en-IN'), icon: TrendingUp, iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600' },
@@ -501,9 +709,50 @@ export default function AdminPanel() {
             <p className="text-xs font-bold uppercase tracking-[0.14em]">DWIS TAP Admin</p>
           </div>
         </div>
-        <button type="button" onClick={handleLogout} className="rounded-full border border-slate-200 bg-slate-50 p-2 text-slate-700" aria-label="Logout">
-          <LogOut className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <button type="button" onClick={() => setNotifOpen((v) => !v)} className="relative rounded-full border border-slate-200 bg-slate-50 p-2 text-slate-700" aria-label="Notifications">
+              <Bell className="h-4 w-4" />
+              {notifCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
+                  {notifCount > 9 ? '9+' : notifCount}
+                </span>
+              )}
+            </button>
+            {notifOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setNotifOpen(false)} />
+                <div className="absolute right-0 z-40 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+                  <p className="px-1 text-xs font-bold uppercase tracking-wide text-slate-400">Notifications</p>
+                  <div className="mt-2 max-h-72 space-y-1 overflow-y-auto">
+                    {notifCount === 0 && <p className="px-1 py-3 text-center text-xs text-slate-400">Nothing new right now.</p>}
+                    {newSignups.map((u) => (
+                      <button key={`m-signup-${u.user_id}`} type="button" onClick={() => { handleSelectFromList(u.email); setNotifOpen(false); }} className="flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left hover:bg-slate-50">
+                        <UserPlus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                        <span className="text-xs text-slate-700"><span className="font-semibold text-slate-900">{u.name || u.email}</span> just signed up</span>
+                      </button>
+                    ))}
+                    {expiringSoon.map((u) => (
+                      <button key={`m-expiring-${u.user_id}`} type="button" onClick={() => { handleSelectFromList(u.email); setNotifOpen(false); }} className="flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left hover:bg-slate-50">
+                        <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                        <span className="text-xs text-slate-700"><span className="font-semibold text-slate-900">{u.name || u.email}</span>'s {u.plan} plan ends in {daysUntil(u.expires_at)}d</span>
+                      </button>
+                    ))}
+                    {recentFailedPayments.map((p) => (
+                      <button key={`m-failed-${p.id}`} type="button" onClick={() => { handleSelectFromList(p.email); setNotifOpen(false); }} className="flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left hover:bg-slate-50">
+                        <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600" />
+                        <span className="text-xs text-slate-700"><span className="font-semibold text-slate-900">{p.name || p.email}</span>'s payment of ₹{(p.amount_paise / 100).toLocaleString('en-IN')} failed</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          <button type="button" onClick={handleLogout} className="rounded-full border border-slate-200 bg-slate-50 p-2 text-slate-700" aria-label="Logout">
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
       </div>
       {menuOpen && (
         <div className="fixed inset-0 z-30 lg:hidden">
@@ -532,6 +781,78 @@ export default function AdminPanel() {
       {/* Main content */}
       <div className="flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <div className="mx-auto max-w-5xl">
+          <div className="mb-4 hidden items-center justify-between lg:flex">
+            <h1 className="text-lg font-bold text-slate-900">Dashboard</h1>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setNotifOpen((v) => !v)}
+                className="relative rounded-full border border-slate-200 bg-white p-2.5 text-slate-600 shadow-sm transition hover:bg-slate-50"
+                aria-label="Notifications"
+              >
+                <Bell className="h-4 w-4" />
+                {notifCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                    {notifCount > 9 ? '9+' : notifCount}
+                  </span>
+                )}
+              </button>
+              {notifOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setNotifOpen(false)} />
+                  <div className="absolute right-0 z-40 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+                    <p className="px-1 text-xs font-bold uppercase tracking-wide text-slate-400">Notifications</p>
+                    <div className="mt-2 max-h-80 space-y-1 overflow-y-auto">
+                      {notifCount === 0 && (
+                        <p className="px-1 py-3 text-center text-xs text-slate-400">Nothing new right now.</p>
+                      )}
+                      {newSignups.map((u) => (
+                        <button
+                          key={`signup-${u.user_id}`}
+                          type="button"
+                          onClick={() => { handleSelectFromList(u.email); setNotifOpen(false); }}
+                          className="flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left hover:bg-slate-50"
+                        >
+                          <UserPlus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                          <span className="text-xs text-slate-700">
+                            <span className="font-semibold text-slate-900">{u.name || u.email}</span> just signed up
+                            <span className="block text-[10px] text-slate-400">{new Date(u.created_at).toLocaleString('en-IN')}</span>
+                          </span>
+                        </button>
+                      ))}
+                      {expiringSoon.map((u) => (
+                        <button
+                          key={`expiring-${u.user_id}`}
+                          type="button"
+                          onClick={() => { handleSelectFromList(u.email); setNotifOpen(false); }}
+                          className="flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left hover:bg-slate-50"
+                        >
+                          <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                          <span className="text-xs text-slate-700">
+                            <span className="font-semibold text-slate-900">{u.name || u.email}</span>'s {u.plan} plan ends in {daysUntil(u.expires_at)} day(s)
+                          </span>
+                        </button>
+                      ))}
+                      {recentFailedPayments.map((p) => (
+                        <button
+                          key={`failed-${p.id}`}
+                          type="button"
+                          onClick={() => { handleSelectFromList(p.email); setNotifOpen(false); }}
+                          className="flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left hover:bg-slate-50"
+                        >
+                          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600" />
+                          <span className="text-xs text-slate-700">
+                            <span className="font-semibold text-slate-900">{p.name || p.email}</span>'s payment of ₹{(p.amount_paise / 100).toLocaleString('en-IN')} failed
+                            <span className="block text-[10px] text-slate-400">{new Date(p.created_at).toLocaleString('en-IN')}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             {KPI_CARDS.map((kpi) => {
               const Icon = kpi.icon;
@@ -573,15 +894,42 @@ export default function AdminPanel() {
               <Users className="h-4 w-4 text-blue-600" />
               <h2 className="text-lg font-bold text-slate-900">Registered users</h2>
             </div>
-            <span className="text-xs font-medium text-slate-400">{isLoadingUsers ? 'Loading…' : `${allUsers.length} shown`}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-slate-400">{isLoadingUsers ? 'Loading…' : `${allUsers.length} shown`}</span>
+              <button
+                type="button"
+                onClick={() => downloadCsv(`users-${todayKey()}.csv`, allUsers.map((u) => ({
+                  name: u.name, email: u.email, plan: u.plan, billing_cycle: u.billing_cycle,
+                  expires_at: u.expires_at, ocr_used: u.ocr_used, created_at: u.created_at,
+                })))}
+                disabled={allUsers.length === 0}
+                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+              >
+                <Download className="h-3 w-3" /> CSV
+              </button>
+            </div>
           </div>
-          <input
-            type="text"
-            value={listSearch}
-            onChange={(e) => setListSearch(e.target.value)}
-            placeholder="Search by name or email…"
-            className="mt-3 w-full rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
-          />
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              value={listSearch}
+              onChange={(e) => setListSearch(e.target.value)}
+              placeholder="Search by name or email…"
+              className="flex-1 min-w-[160px] rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500"
+            />
+            {(['all', 'trial', 'basic', 'pro'] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setUserPlanFilter(p)}
+                className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-semibold capitalize ${
+                  userPlanFilter === p ? 'bg-blue-600 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
           {listError && <p className="mt-2 text-xs text-red-600">{listError}</p>}
           <div className="mt-3 max-h-80 overflow-y-auto overflow-x-auto rounded-xl border border-slate-200">
             <table className="w-full text-left text-xs">
@@ -596,10 +944,12 @@ export default function AdminPanel() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {allUsers.length === 0 && !isLoadingUsers && (
-                  <tr><td colSpan={6} className="px-3 py-4 text-center text-slate-400">No users found.</td></tr>
-                )}
-                {allUsers.map((u) => (
+                {(() => {
+                  const filteredUsers = userPlanFilter === 'all' ? allUsers : allUsers.filter((u) => u.plan === userPlanFilter);
+                  if (filteredUsers.length === 0 && !isLoadingUsers) {
+                    return <tr><td colSpan={6} className="px-3 py-4 text-center text-slate-400">No users found.</td></tr>;
+                  }
+                  return filteredUsers.map((u) => (
                   <tr
                     key={u.user_id}
                     onClick={() => handleSelectFromList(u.email)}
@@ -614,7 +964,8 @@ export default function AdminPanel() {
                       {usedToday(u)} / {DAILY_OCR_PAGE_LIMITS[u.plan as PlanId] ?? '—'}
                     </td>
                   </tr>
-                ))}
+                  ));
+                })()}
               </tbody>
             </table>
           </div>
@@ -625,7 +976,7 @@ export default function AdminPanel() {
         <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-lg font-bold text-slate-900">All payments</h2>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {(['all', 'success', 'failed', 'pending'] as const).map((s) => (
                 <button
                   key={s}
@@ -638,6 +989,30 @@ export default function AdminPanel() {
                   {s}
                 </button>
               ))}
+              <input type="date" value={paymentFromDate} onChange={(e) => setPaymentFromDate(e.target.value)} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] text-slate-700 outline-none focus:border-blue-500" />
+              <span className="text-[11px] text-slate-400">to</span>
+              <input type="date" value={paymentToDate} onChange={(e) => setPaymentToDate(e.target.value)} className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] text-slate-700 outline-none focus:border-blue-500" />
+              <button
+                type="button"
+                onClick={() => {
+                  const rows = allPayments.filter((p) => {
+                    if (paymentStatusFilter !== 'all' && p.status !== paymentStatusFilter) return false;
+                    const day = p.created_at.slice(0, 10);
+                    if (paymentFromDate && day < paymentFromDate) return false;
+                    if (paymentToDate && day > paymentToDate) return false;
+                    return true;
+                  });
+                  downloadCsv(`payments-${todayKey()}.csv`, rows.map((p) => ({
+                    date: p.created_at, name: p.name, email: p.email, plan: p.plan, billing_cycle: p.billing_cycle,
+                    amount_inr: p.amount_paise / 100, status: p.status, source: p.source,
+                    razorpay_payment_id: p.razorpay_payment_id, note: p.note,
+                  })));
+                }}
+                disabled={allPayments.length === 0}
+                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+              >
+                <Download className="h-3 w-3" /> CSV
+              </button>
             </div>
           </div>
           {paymentsError && <p className="mt-2 text-xs text-red-600">{paymentsError}</p>}
@@ -656,7 +1031,13 @@ export default function AdminPanel() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {(() => {
-                  const rows = paymentStatusFilter === 'all' ? allPayments : allPayments.filter((p) => p.status === paymentStatusFilter);
+                  const rows = allPayments.filter((p) => {
+                    if (paymentStatusFilter !== 'all' && p.status !== paymentStatusFilter) return false;
+                    const day = p.created_at.slice(0, 10);
+                    if (paymentFromDate && day < paymentFromDate) return false;
+                    if (paymentToDate && day > paymentToDate) return false;
+                    return true;
+                  });
                   if (rows.length === 0 && !isLoadingPayments) {
                     return <tr><td colSpan={7} className="px-3 py-4 text-center text-slate-400">No payments found.</td></tr>;
                   }
@@ -703,6 +1084,268 @@ export default function AdminPanel() {
             </button>
           </form>
           {lookupError && <p className="mt-2 text-xs text-red-600">{lookupError}</p>}
+        </div>
+        )}
+
+        {activeTab === 'chat' && (
+        <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-card">
+          <div className="grid grid-cols-1 sm:grid-cols-[260px_1fr] sm:divide-x sm:divide-slate-200">
+            <div className="max-h-[32rem] overflow-y-auto border-b border-slate-200 sm:border-b-0">
+              <div className="px-4 py-3">
+                <h2 className="text-sm font-bold text-slate-900">Conversations</h2>
+                {chatError && <p className="mt-1 text-xs text-red-600">{chatError}</p>}
+              </div>
+              {isLoadingConversations && <p className="px-4 pb-3 text-xs text-slate-400">Loading…</p>}
+              {!isLoadingConversations && conversations.length === 0 && (
+                <p className="px-4 pb-4 text-xs text-slate-400">No messages from users yet.</p>
+              )}
+              {conversations.map((c) => (
+                <button
+                  key={c.user_id}
+                  type="button"
+                  onClick={() => handleOpenChat(c.user_id)}
+                  className={`flex w-full items-start gap-2.5 border-t border-slate-100 px-4 py-3 text-left transition first:border-t-0 ${
+                    activeChatUserId === c.user_id ? 'bg-blue-50' : 'hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">
+                    {(c.name || c.email).trim().slice(0, 1).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-1">
+                      <p className="truncate text-xs font-semibold text-slate-900">{c.name || c.email}</p>
+                      {c.unread_count > 0 && (
+                        <span className="shrink-0 rounded-full bg-red-500 px-1.5 py-0.5 text-[9px] font-bold text-white">{c.unread_count}</span>
+                      )}
+                    </div>
+                    <p className="truncate text-[11px] text-slate-500">
+                      {c.last_sender === 'admin' ? 'You: ' : ''}{c.last_message}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex h-[28rem] flex-col sm:h-[32rem]">
+              {!activeChatUserId ? (
+                <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-slate-400">
+                  Select a conversation to view messages.
+                </div>
+              ) : (
+                <>
+                  <div className="flex-1 space-y-2 overflow-y-auto p-4">
+                    {chatMessages.map((m) => (
+                      <div key={m.id} className={`flex ${m.sender === 'admin' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[75%] rounded-2xl px-3 py-2 text-xs ${
+                          m.sender === 'admin' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-800'
+                        }`}>
+                          <p>{m.body}</p>
+                          <p className={`mt-1 text-[9px] ${m.sender === 'admin' ? 'text-blue-100' : 'text-slate-400'}`}>
+                            {new Date(m.created_at).toLocaleString('en-IN')}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {chatMessages.length === 0 && (
+                      <p className="py-8 text-center text-xs text-slate-400">No messages yet in this conversation.</p>
+                    )}
+                  </div>
+                  <form
+                    onSubmit={(e) => { e.preventDefault(); handleSendChat(); }}
+                    className="flex items-center gap-2 border-t border-slate-200 p-3"
+                  >
+                    <input
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      placeholder="Type a message"
+                      className="flex-1 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-900 outline-none focus:border-blue-500 focus:bg-white"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSendingChat || !chatInput.trim()}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white transition hover:bg-blue-700 disabled:opacity-50"
+                      aria-label="Send"
+                    >
+                      <Send className="h-4 w-4" />
+                    </button>
+                  </form>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+        )}
+
+        {activeTab === 'analytics' && (
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+            <h2 className="text-sm font-bold text-slate-900">Revenue - last 14 days</h2>
+            <p className="text-[11px] text-slate-400">Successful payments only (₹)</p>
+            <div className="mt-4 flex h-36 items-end gap-1.5">
+              {revenueByDay.map((d) => (
+                <div key={d.day} className="group relative flex flex-1 flex-col items-center justify-end" title={`${new Date(d.day).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}: ₹${d.amount.toLocaleString('en-IN')}`}>
+                  <div
+                    className="w-full rounded-t-sm"
+                    style={{ height: `${Math.max(3, (d.amount / maxDailyRevenue) * 100)}%`, backgroundColor: '#2a78d6' }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 flex justify-between text-[9px] text-slate-400">
+              <span>{new Date(days14[0]).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
+              <span>{new Date(days14[days14.length - 1]).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+            <h2 className="text-sm font-bold text-slate-900">New signups - last 14 days</h2>
+            <p className="text-[11px] text-slate-400">Registered accounts per day</p>
+            <div className="mt-4 flex h-36 items-end gap-1.5">
+              {signupsByDay.map((d) => (
+                <div key={d.day} className="flex flex-1 flex-col items-center justify-end" title={`${new Date(d.day).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}: ${d.count} signup(s)`}>
+                  <div
+                    className="w-full rounded-t-sm"
+                    style={{ height: `${Math.max(3, (d.count / maxDailySignups) * 100)}%`, backgroundColor: '#2a78d6' }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 flex justify-between text-[9px] text-slate-400">
+              <span>{new Date(days14[0]).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
+              <span>{new Date(days14[days14.length - 1]).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+            <h2 className="text-sm font-bold text-slate-900">Users by plan</h2>
+            <div className="mt-4 space-y-3">
+              {planCounts.map((p) => (
+                <div key={p.plan}>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 font-medium capitalize text-slate-700">
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: PLAN_COLOR[p.plan] }} />
+                      {p.plan}
+                    </span>
+                    <span className="font-semibold text-slate-900">{p.count}</span>
+                  </div>
+                  <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-full rounded-full" style={{ width: `${(p.count / maxPlanCount) * 100}%`, backgroundColor: PLAN_COLOR[p.plan] }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+            <h2 className="text-sm font-bold text-slate-900">Payments by status</h2>
+            <div className="mt-4 space-y-3">
+              {statusCounts.map((s) => (
+                <div key={s.status}>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 font-medium capitalize text-slate-700">
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: STATUS_COLOR[s.status] }} />
+                      {s.status}
+                    </span>
+                    <span className="font-semibold text-slate-900">{s.count}</span>
+                  </div>
+                  <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-full rounded-full" style={{ width: `${(s.count / maxStatusCount) * 100}%`, backgroundColor: STATUS_COLOR[s.status] }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-4 text-[11px] text-slate-400">
+              Profit/loss isn't shown here - expenses (server, ads, etc.) aren't tracked anywhere in the system yet, only revenue.
+            </p>
+          </div>
+        </div>
+        )}
+
+        {activeTab === 'activity' && (
+        <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <History className="h-4 w-4 text-blue-600" />
+              <h2 className="text-lg font-bold text-slate-900">Activity log</h2>
+            </div>
+            <span className="text-xs font-medium text-slate-400">{isLoadingAudit ? 'Loading…' : `${auditEntries.length} entries`}</span>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">Every grant, expire, and coupon action taken from this admin panel.</p>
+          {auditError && <p className="mt-2 text-xs text-red-600">{auditError}</p>}
+          <div className="mt-3 max-h-96 overflow-y-auto overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0 bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">Date</th>
+                  <th className="px-3 py-2 font-semibold">Action</th>
+                  <th className="px-3 py-2 font-semibold">Target / Code</th>
+                  <th className="px-3 py-2 font-semibold">Days</th>
+                  <th className="px-3 py-2 font-semibold">New plan</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {auditEntries.length === 0 && !isLoadingAudit && (
+                  <tr><td colSpan={5} className="px-3 py-4 text-center text-slate-400">No activity recorded yet.</td></tr>
+                )}
+                {auditEntries.map((e) => (
+                  <tr key={e.id}>
+                    <td className="whitespace-nowrap px-3 py-2 text-slate-700">{new Date(e.created_at).toLocaleString('en-IN')}</td>
+                    <td className="px-3 py-2">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-700">{(e.action || 'grant').replace(/_/g, ' ')}</span>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-slate-700">{e.target_email}</td>
+                    <td className="px-3 py-2 text-slate-700">{e.extra_days || '—'}</td>
+                    <td className="px-3 py-2 text-slate-700">{e.new_plan || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        )}
+
+        {activeTab === 'profile' && (
+        <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-card">
+          <div className="h-24 bg-gradient-to-r from-blue-500 to-indigo-600 sm:h-28" />
+          <div className="px-6 pb-6">
+            <div className="-mt-10 flex flex-wrap items-end justify-between gap-3 sm:-mt-12">
+              <div className="flex items-end gap-3">
+                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl border-4 border-white bg-blue-600 shadow-lg shadow-blue-600/30 sm:h-24 sm:w-24">
+                  <User className="h-9 w-9 text-white sm:h-10 sm:w-10" />
+                </div>
+                <div className="pb-1">
+                  <h2 className="text-lg font-bold text-slate-900">Admin</h2>
+                  <p className="text-xs text-slate-500">DWIS TAP Admin Panel</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="mb-1 inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-4 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Log out
+              </button>
+            </div>
+          <div className="mt-6 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+              <p className="text-[11px] uppercase text-slate-400">Total users</p>
+              <p className="mt-1 text-lg font-bold text-slate-900">{allUsers.length.toLocaleString('en-IN')}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+              <p className="text-[11px] uppercase text-slate-400">New signups (24h)</p>
+              <p className="mt-1 text-lg font-bold text-slate-900">{newSignups.length}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+              <p className="text-[11px] uppercase text-slate-400">Plans expiring soon</p>
+              <p className="mt-1 text-lg font-bold text-slate-900">{expiringSoon.length}</p>
+            </div>
+          </div>
+          <p className="mt-5 text-xs text-slate-500">
+            Admin access is passcode-based (set via <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono">ADMIN_PASSCODE</code> on the server) - there's no separate admin account record to edit here. To change the passcode, update that environment variable on the server and redeploy.
+          </p>
+          </div>
         </div>
         )}
 
@@ -821,9 +1464,15 @@ export default function AdminPanel() {
 
         {activeTab === 'find' && foundUser && (
           <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
-            <div className="flex items-center gap-2">
-              <User className="h-4 w-4 text-blue-600" />
-              <h3 className="text-base font-bold text-slate-900">{foundUser.name} · {foundUser.email}</h3>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">User profile</p>
+            <div className="mt-2 flex items-center gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-50 text-sm font-bold text-blue-700">
+                {(foundUser.name || foundUser.email).trim().slice(0, 1).toUpperCase()}
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">{foundUser.name}</h3>
+                <p className="text-xs text-slate-500">{foundUser.email}</p>
+              </div>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-3 text-sm text-slate-600 sm:grid-cols-4">
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">

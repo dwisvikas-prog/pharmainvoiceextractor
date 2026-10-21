@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { apiUrl } from './apiBase';
 
 export interface AuthUser {
   id: string;
@@ -241,6 +242,16 @@ export const registerUser = async (payload: AuthPayload): Promise<AuthSession> =
   });
   if (error) throw new Error(error.message);
   if (!data.user) throw new Error('Registration failed.');
+
+  // Supabase deliberately returns a 200 with no error for an email that's
+  // already registered (so attackers can't enumerate accounts via signup) -
+  // it just comes back with an empty identities array and sends no email.
+  // Surface that as a clear "already registered" message instead of letting
+  // it fall through to the generic "check your email" success path below.
+  if (data.user.identities && data.user.identities.length === 0) {
+    throw new Error('This email is already registered. Please log in instead, or use "Forgot password" if you don\'t remember your password.');
+  }
+
   if (!data.session) {
     throw new Error('Account created. Check your email to confirm before logging in.');
   }
@@ -297,10 +308,40 @@ export const resendConfirmationEmail = async (email: string): Promise<void> => {
 // Sends the "reset your password" email. Supabase redirects the user back
 // to redirectTo with a recovery token in the URL hash; App.tsx listens for
 // the PASSWORD_RECOVERY auth event to show the "set new password" form.
+//
+// Supabase's own resetPasswordForEmail() always returns success (even for an
+// email that was never registered) to prevent account enumeration. We check
+// first via our own /api/check-email endpoint so an unregistered user gets a
+// clear "no account" message instead of a misleading "check your inbox".
 export const sendPasswordResetEmail = async (email: string): Promise<void> => {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  const isRegistered = await checkEmailRegistered(normalizedEmail);
+  if (isRegistered === false) {
+    throw new Error('No account found with that email. Please register first.');
+  }
+
   const redirectTo = `${window.location.origin}${window.location.pathname}`;
-  const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo });
+  const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, { redirectTo });
   if (error) throw new Error(error.message);
+};
+
+// Returns true/false if the check succeeded, or null if the check endpoint
+// itself failed - callers should fall back to the generic Supabase flow
+// rather than block a legitimate reset on our own endpoint being down.
+const checkEmailRegistered = async (email: string): Promise<boolean | null> => {
+  try {
+    const response = await fetch(apiUrl('/api/check-email'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return Boolean(data.registered);
+  } catch {
+    return null;
+  }
 };
 
 // Verifies the recovery token_hash from the reset email link and sets the

@@ -195,6 +195,25 @@ function supabase_update($table, $filters, $patch) {
     ]);
 }
 
+// Inserts a row and hands back the inserted row (unlike supabase_insert,
+// which is fire-and-forget). Used where the caller needs the new row's id.
+function supabase_insert_returning($table, $row) {
+    $serviceKey = env('SUPABASE_SERVICE_ROLE_KEY');
+    $url = supabase_url() . '/rest/v1/' . $table;
+    [$status, $body] = http_request('POST', $url, $row, [
+        'apikey: ' . $serviceKey,
+        'Authorization: Bearer ' . $serviceKey,
+        'Content-Type: application/json',
+        'Prefer: return=representation',
+    ]);
+    $data = json_decode($body, true);
+    if ($status >= 400) {
+        $message = is_array($data) && isset($data['message']) ? $data['message'] : $body;
+        return [null, $message ?: "Supabase insert into $table failed ($status)"];
+    }
+    return [is_array($data) && isset($data[0]) ? $data[0] : $data, null];
+}
+
 // Selects rows via PostgREST with simple eq() filters, e.g.
 // supabase_select('entitlements', ['user_id' => 'eq.' . $id], 'plan,billing_cycle,expires_at')
 function supabase_select($table, $filters, $columns = '*') {
